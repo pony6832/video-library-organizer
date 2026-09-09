@@ -5,6 +5,7 @@ from pathlib import Path
 from typing import Iterable
 import uuid
 from zipfile import BadZipFile
+from xml.etree.ElementTree import ParseError
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.utils.exceptions import InvalidFileException
@@ -95,27 +96,33 @@ def read_reviewed_paths_strict(excel_path: Path) -> set[str]:
         raise ReviewedPathsError("找不到 Excel 媒體清冊")
     try:
         workbook = load_workbook(source, read_only=True, data_only=True)
-    except (OSError, BadZipFile, InvalidFileException) as error:
+    except PermissionError:
+        raise
+    except (OSError, BadZipFile, InvalidFileException, ParseError) as error:
         raise ReviewedPathsError("Excel 媒體清冊無法讀取") from error
     try:
         if "媒體清冊" not in workbook.sheetnames:
             raise ReviewedPathsError("Excel 缺少媒體清冊工作表")
         sheet = workbook["媒體清冊"]
+        rows = sheet.iter_rows(values_only=True)
         headers = {
-            cell.value: index
-            for index, cell in enumerate(sheet[1], start=1)
-            if isinstance(cell.value, str)
+            value: index
+            for index, value in enumerate(next(rows, ()))
+            if isinstance(value, str)
         }
         status_column = headers.get("狀態")
         path_column = headers.get("完整路徑")
         if status_column is None or path_column is None:
             raise ReviewedPathsError("Excel 缺少狀態或完整路徑欄位")
         return {
-            str(sheet.cell(row, path_column).value)
-            for row in range(2, sheet.max_row + 1)
-            if sheet.cell(row, status_column).value == "已審核"
-            and sheet.cell(row, path_column).value
+            str(row[path_column])
+            for row in rows
+            if len(row) > max(status_column, path_column)
+            and row[status_column] == "已審核"
+            and row[path_column]
         }
+    except (BadZipFile, ParseError, KeyError, ValueError) as error:
+        raise ReviewedPathsError("Excel 媒體清冊內容損壞，請先修復或還原備份") from error
     finally:
         workbook.close()
 
@@ -124,7 +131,10 @@ def write_excel(records: Iterable[MediaRecord], output_path: Path) -> Path:
     destination = Path(output_path).resolve()
     destination.parent.mkdir(parents=True, exist_ok=True)
     catalog_records = list(records)
-    reviewed_paths = read_reviewed_paths(destination)
+    reviewed_paths = (
+        {str(Path(path).resolve()).casefold() for path in read_reviewed_paths_strict(destination)}
+        if destination.exists() else set()
+    )
 
     workbook = Workbook()
     sheet = workbook.active
@@ -138,7 +148,7 @@ def write_excel(records: Iterable[MediaRecord], output_path: Path) -> Path:
             (
                 (
                     "已審核"
-                    if path_text in reviewed_paths
+                    if path_text.casefold() in reviewed_paths
                     else _STATUS_LABELS[record.status]
                 ),
                 record.path.name,
@@ -158,6 +168,10 @@ def write_excel(records: Iterable[MediaRecord], output_path: Path) -> Path:
                 record.error,
             )
         )
+        # Filenames and model output are data, even when they start with '='.
+        for cell in sheet[sheet.max_row]:
+            if isinstance(cell.value, str):
+                cell.data_type = "s"
         path_cell = sheet.cell(sheet.max_row, 3)
         if source_path.is_file():
             path_cell.hyperlink = source_path.as_uri()

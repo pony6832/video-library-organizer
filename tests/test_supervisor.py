@@ -304,6 +304,25 @@ def test_safe_stop_sets_request_without_terminating_worker(
     assert process.terminate_calls == 0
 
 
+def test_explicit_safe_stop_never_restarts_stale_worker(tmp_path: Path) -> None:
+    root, _, store, run_id = prepared_root(tmp_path)
+    process = FakeProcess()
+    factory = ProcessFactory([process, FakeProcess()])
+    clock = iter((100.0, 111.0))
+    supervisor = WorkerSupervisor(
+        process_factory=factory, store_factory=lambda _workspace: store,
+        monotonic=lambda: next(clock), heartbeat_is_fresh=lambda _run: False,
+        startup_grace_seconds=0,
+    )
+    supervisor.start(root, tmp_path / "skill")
+    supervisor.request_safe_stop()
+    supervisor.poll()
+    stopped = supervisor.poll()
+    assert stopped.status == "stopped"
+    assert len(factory.arguments) == 1
+    assert store.get_run(run_id).stop_requested is True
+
+
 def test_worker_gets_startup_grace_before_missing_heartbeat_is_stale(
     tmp_path: Path,
 ) -> None:

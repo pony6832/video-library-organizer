@@ -279,7 +279,23 @@ class SegmentPipeline:
         ocr_text: str,
     ) -> int:
         failures = 0
-        for segment in select_force_segments(segments, limit=12):
+        # Adopt already attempted targets when upgrading an interrupted old run.
+        attempted = [
+            s for s in segments
+            if s.cloud_result_json is not None
+            or (s.error and s.error.startswith(("cloud_failed:", "cloud_quota_exhausted")))
+        ]
+        attempted_ids = {s.segment_id for s in attempted}
+        available = [s for s in segments if s.segment_id not in attempted_ids]
+        candidates = attempted[:12]
+        if len(candidates) < 12 and available:
+            candidates += list(select_force_segments(available, limit=12 - len(candidates)))
+        target_ids = set(self.store.force_targets(
+            segments[0].run_id, record.id, tuple(s.segment_id for s in candidates)
+        ))
+        for segment in segments:
+            if segment.segment_id not in target_ids:
+                continue
             run = self.store.get_run(segment.run_id)
             if run is not None and run.stop_requested:
                 raise SafeStopRequested("safe stop requested")

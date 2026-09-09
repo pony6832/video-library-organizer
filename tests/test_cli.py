@@ -64,6 +64,15 @@ def test_cli_reports_invalid_root_without_creating_fallback(
     assert not missing.exists()
 
 
+def test_catalog_refresh_reports_corrupt_excel_without_overwrite(tmp_path: Path, capsys) -> None:
+    root = _catalog_root_with_one_pending_photo(tmp_path)
+    output = root / "媒體整理成果" / "媒體清冊.xlsx"
+    output.write_bytes(b"damaged-review-data")
+    assert main(["start", str(root)]) == 2
+    assert "MEDIA_CATALOG_ERROR" in capsys.readouterr().err
+    assert output.read_bytes() == b"damaged-review-data"
+
+
 def test_cli_analyze_all_prints_fixed_summary(tmp_path: Path, capsys) -> None:
     root = _catalog_root_with_one_pending_photo(tmp_path)
 

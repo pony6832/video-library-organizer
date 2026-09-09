@@ -22,6 +22,34 @@ try {
         throw "Missing desktop shortcut installer: $shortcutInstaller"
     }
 
+    # Resolve prerequisites before moving an existing installation.
+    $pythonCommand = @(Get-Command python -CommandType Application -ErrorAction Stop)[0]
+    & $pythonCommand.Source -c "import sys; assert sys.version_info >= (3, 11), 'Python 3.11 or newer is required'; import tkinter; import venv"
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Python 3.11+, Tkinter and venv are required before installation'
+    }
+    $nodeCommand = @(Get-Command node -CommandType Application -ErrorAction Stop)[0]
+    $npmCommand = @(Get-Command npm.cmd -CommandType Application -ErrorAction Stop)[0]
+    $nodeVersion = (& $nodeCommand.Source --version | Out-String).Trim()
+    if ($LASTEXITCODE -ne 0 -or $nodeVersion -notmatch '^v(?<major>\d+)\.') {
+        throw "Unable to read Node.js version: $nodeVersion"
+    }
+    if ([int]$Matches['major'] -lt 18) {
+        throw "Node.js 18 or newer is required: $nodeVersion"
+    }
+    & $npmCommand.Source --version
+    if ($LASTEXITCODE -ne 0) {
+        throw 'npm is not operational'
+    }
+    $packageValidator = Join-Path $projectRootPath 'scripts\validate-media-inventory-package.py'
+    if (-not (Test-Path -LiteralPath $packageValidator -PathType Leaf)) {
+        throw "Missing bundled package validator: $packageValidator"
+    }
+    & $pythonCommand.Source $packageValidator $sourceSkill
+    if ($LASTEXITCODE -ne 0) {
+        throw 'Source Skill package validation failed'
+    }
+
     $destinationFull = [IO.Path]::GetFullPath($Destination)
     if ([IO.Path]::GetFileName($destinationFull) -ne 'media-inventory') {
         throw "Destination 必須以 media-inventory 為資料夾名稱：$destinationFull"
@@ -58,7 +86,6 @@ try {
 
     Copy-Item -LiteralPath $sourceResolved -Destination $destinationFull -Recurse -ErrorAction Stop
 
-    $pythonCommand = @(Get-Command python -CommandType Application -ErrorAction Stop)[0]
     $runtimeRoot = Join-Path $destinationFull '.runtime'
     & $pythonCommand.Source -m venv $runtimeRoot
     if ($LASTEXITCODE -ne 0) {
@@ -89,16 +116,6 @@ try {
         throw "Tkinter 或 Media Catalog A+ 狀態 UI 無法載入，exit=$LASTEXITCODE"
     }
 
-    $nodeCommand = @(Get-Command node -CommandType Application -ErrorAction Stop)[0]
-    $npmCommand = @(Get-Command npm.cmd -CommandType Application -ErrorAction Stop)[0]
-    $nodeVersion = (& $nodeCommand.Source --version).Trim()
-    if ($LASTEXITCODE -ne 0 -or $nodeVersion -notmatch '^v(?<major>\d+)\.') {
-        throw "Unable to read Node.js version: $nodeVersion"
-    }
-    if ([int]$Matches['major'] -lt 18) {
-        throw "Node.js 18 or newer is required: $nodeVersion"
-    }
-
     $mcpRoot = Join-Path $destinationFull '.tools\mcp-video-analyzer'
     $npmCache = Join-Path $mcpRoot '.npm-cache'
     New-Item -ItemType Directory -Path $mcpRoot -Force | Out-Null
@@ -123,11 +140,7 @@ try {
         throw "Unexpected mcp-video-analyzer package: name=$($mcpPackage.name) version=$($mcpPackage.version)"
     }
 
-    $quickValidator = Join-Path $env:USERPROFILE '.codex\skills\.system\skill-creator\scripts\quick_validate.py'
-    if (-not (Test-Path -LiteralPath $quickValidator -PathType Leaf)) {
-        throw "找不到 Skill 驗證器：$quickValidator"
-    }
-    & $pythonCommand.Source $quickValidator $destinationFull
+    & $runtimePython $packageValidator $destinationFull
     if ($LASTEXITCODE -ne 0) {
         throw "Skill 套件驗證失敗，exit=$LASTEXITCODE"
     }

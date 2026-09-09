@@ -57,7 +57,7 @@ Skill 會先掃描指定的單一根目錄，將 SQLite、Excel 與工作暫存�
 - 關機或 UI 完全關閉後不會常駐啟動。再次輸入同一句指令即可繼續。
 - Excel 開啟導致檔案鎖定時，分析繼續寫入 SQLite，UI 顯示「等待 Excel 關閉」。關閉 Excel 後按「開始／繼續」，工作簿會從 SQLite 重建。
 - 強制模式安全停止後，重新開啟 UI 並再次選擇「強制 Gemini 強化」即可從同一模式的 checkpoint 續跑；不要改按普通模式混用同一個未完成批次。
-- 只有 `failed=0 remaining=0 excel_sync_pending=false` 才會輸出 `MEDIA_ANALYSIS_READY`。
+- `MEDIA_ANALYSIS_READY` 表示批次已處理完且 Excel 已同步。一般模式仍須確認失敗數為 0；強制 Gemini 批次可能帶雲端失敗／額度警告完成，必須同時檢查 `failed` 與警告，不可解讀為所有雲端辨識均成功。
 
 ## 新電腦安裝
 

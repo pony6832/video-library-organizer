@@ -292,6 +292,9 @@ class WorkerSupervisor:
                 wait(timeout=5)
             except subprocess.TimeoutExpired:
                 return SupervisorSnapshot("error", True, run)
+        if self._safe_stop_requested:
+            self._checkpoint_crash()
+            return SupervisorSnapshot("stopped", False, self._require_run())
         if self._restart_used:
             self._checkpoint_crash()
             return SupervisorSnapshot("error", False, run)

@@ -385,3 +385,47 @@ def test_force_mode_checks_safe_stop_between_cloud_segments(
         )
 
     assert len(gemini.requests) == 1
+
+
+def test_force_resume_keeps_targets_after_cloud_results_change_quality(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+    gemini = RecordingGemini()
+    pipeline = SegmentPipeline(
+        segmenter=FakeSegmenter(24), selector=ThreeFrameSelector(),
+        local_analyzer=RecordingLocalAnalyzer(WEAK), gemini_client=gemini,
+        store=store, output_root=tmp_path / "segments",
+    )
+    record = _video_record(tmp_path)
+    first = pipeline.analyze_video(record, "run-1", mode=AnalysisMode.FORCE_GEMINI)
+    resumed = pipeline.analyze_video(record, "run-1", mode=AnalysisMode.FORCE_GEMINI)
+    assert first.warning is None
+    assert resumed.warning is None
+    assert len(gemini.requests) == 12
+    assert not any(s.error == "cloud_quota_exhausted" for s in store.list_segments(record.id))
+
+
+def test_force_resume_preserves_targets_after_partial_safe_stop(tmp_path: Path) -> None:
+    store = _store(tmp_path)
+
+    class StopOnceGemini(RecordingGemini):
+        def analyze(self, request):
+            result = super().analyze(request)
+            if len(self.requests) == 1:
+                store.request_stop("run-1")
+            return result
+
+    gemini = StopOnceGemini()
+    pipeline = SegmentPipeline(
+        segmenter=FakeSegmenter(24), selector=ThreeFrameSelector(),
+        local_analyzer=RecordingLocalAnalyzer(WEAK), gemini_client=gemini,
+        store=store, output_root=tmp_path / "segments",
+    )
+    record = _video_record(tmp_path)
+    with pytest.raises(SafeStopRequested):
+        pipeline.analyze_video(record, "run-1", mode=AnalysisMode.FORCE_GEMINI)
+    targets = store.force_targets("run-1", record.id, ())
+    store.clear_stop("run-1")
+    result = pipeline.analyze_video(record, "run-1", mode=AnalysisMode.FORCE_GEMINI)
+    assert result.warning is None
+    assert len(gemini.requests) == 12
+    assert {s.segment_id for s in store.list_segments(record.id) if s.cloud_result_json} == set(targets)

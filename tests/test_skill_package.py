@@ -1,7 +1,6 @@
 import os
 import subprocess
 import sys
-import tomllib
 from pathlib import Path
 
 
@@ -25,21 +24,13 @@ def test_skill_contains_standalone_ui_launcher() -> None:
     assert "[string]$RootPath = ''" in text
 
 
-def test_skill_package_passes_official_validation() -> None:
-    validator = (
-        Path.home()
-        / ".codex"
-        / "skills"
-        / ".system"
-        / "skill-creator"
-        / "scripts"
-        / "quick_validate.py"
-    )
+def test_skill_package_passes_bundled_validation_without_site_packages() -> None:
+    validator = Path('scripts/validate-media-inventory-package.py')
     environment = dict(os.environ)
     environment["PYTHONUTF8"] = "1"
 
     result = subprocess.run(
-        [sys.executable, str(validator), str(SKILL_ROOT)],
+        [sys.executable, '-S', str(validator), str(SKILL_ROOT)],
         capture_output=True,
         text=True,
         encoding="utf-8",
@@ -49,12 +40,3 @@ def test_skill_package_passes_official_validation() -> None:
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
-
-
-def test_test_extra_declares_pyyaml() -> None:
-    project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))
-
-    assert any(
-        item.lower().startswith("pyyaml")
-        for item in project["project"]["optional-dependencies"]["test"]
-    )

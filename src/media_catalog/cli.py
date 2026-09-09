@@ -102,6 +102,7 @@ def main(
             WorkspacePathError,
             PermissionError,
             AnalysisAlreadyRunningError,
+            ReviewedPathsError,
         ) as error:
             _print_console(f"MEDIA_CATALOG_ERROR {error}", stream=sys.stderr)
             return 2

@@ -45,7 +45,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "<skill-root>\scripts\run_me
 
 1. 無預設路徑時，UI 顯示紅燈「尚未選擇資料夾」，不啟動 worker。
 2. 按「選擇資料夾」並指定單一根目錄；取消時不建立任何成果。
-3. 有效路徑會在背景建立或更新清冊，完成後自動開始分析。
+3. 有效路徑會在背景建立或更新清冊，完成後顯示「清冊就緒，請選擇分析模式」。按「開始／繼續」進行一般分析，或依下方流程使用「強制 Gemini 強化」。這個等待狀態不是故障。
 4. 執行中不可切換路徑；先按「安全停止」，等待 worker 退出後再選擇。
 
 桌面入口不取代 Codex 流程。當 Codex 已提供 `RootPath` 時，launcher 仍直接顯示該路徑並自動開始，不要再次要求使用者選擇。捷徑不得包含 Gemini Key、模型名稱或上次媒體路徑。
@@ -54,10 +54,23 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "<skill-root>\scripts\run_me
 
 - 路徑不存在或指向磁碟根目錄：回報固定錯誤，不建立替代資料夾。
 - `MEDIA_ANALYSIS_ERROR`：回報環境、來源驗證、Excel 鎖定或重複批次錯誤；不要繞過 Ollama、FFmpeg、Watch 或版本檢查。
-- 同一根目錄不可同時執行兩個分析程序。異常中斷後直接重新執行分析 launcher，它會在取得批次鎖後安全恢復。
-- Excel 正開啟時分析會繼續寫入 SQLite，UI 顯示「等待 Excel 關閉」；關閉 Excel 後再按「開始／繼續」。
+- 同一根目錄不可同時執行兩個分析程序。一般模式中斷後可重新執行分析 launcher；強制 Gemini 中斷則使用下方同模式續跑流程。
+- Excel 損壞或缺少必要欄位時停止更新，保留原檔，不可刪除清冊繞過人工審核保護。先請使用者修復或由備份還原 Excel，再續跑。
+- Excel 正開啟時分析會繼續寫入 SQLite，UI 顯示「等待 Excel 關閉」；關閉 Excel 後，一般模式按「開始／繼續」，強制模式依下方同模式續跑流程。
 - Gemini 只從私人環境變數 `GEMINI_API_KEY` 讀取。更換或撤銷金鑰後重新啟動 UI；不要把金鑰寫入指令、Skill、Excel 或專案檔案。
 
 ## 換電腦使用
 
 不要直接複製已安裝 Skill 裡的 `.runtime` 或 `.tools`。Python 虛擬環境與 Node 工具包含電腦專屬路徑；每台新電腦都必須從專案原始碼重新執行安裝器。分析前需有 Python 3.11+、Node.js 18+、FFmpeg、Ollama 與 `Qwen3-vl:8b-instruct` 模型。
+
+安裝器使用專案內附驗證器，不需要另裝 Codex 的技能開發工具。Python 必須包含 Tkinter 與 venv，npm 必須可執行；下載 Python／Node 套件仍需要網路。若安裝失敗，回報安裝器列出的備份路徑，不刪除備份。
+
+## 強制 Gemini 強化與續跑
+
+1. 在 UI 選定指定根目錄，等到清冊就緒且沒有 worker 執行，按「強制 Gemini 強化」。此模式會傳送預覽到外部 Gemini API 並可能產生費用；不可把一般整理要求自行升級為強制模式。
+2. Key 只從私人 `GEMINI_API_KEY` 讀取；若設定 `GEMINI_MODEL`，目前須為 `gemini-3.7-flash`。不要將 Key 寫入任何檔案或回覆。
+3. 確認視窗列出未審核照片／影片、略過的已審核數，以及一般與含重試請求上限。讓使用者確認才啟動；取消不執行。Excel「已審核」的媒體會略過。
+4. 中斷後選擇同一根目錄，再按「強制 Gemini 強化」，沿用未完成的強制批次與已鎖定片段。不要改按「開始／繼續」或一般 launcher，那會使用 AUTO 模式。
+5. 安全停止會等待目前片段 checkpoint；不要因暫時沒有進度而另開第二個程序。
+
+UI 視窗出現、`UI_STARTED` 或綠燈均不等於分析完成。桌面模式請確認最終完成狀態、未完成數為 0、Excel 同步完成，並檢查失敗／警告；不可只因啟動命令返回就宣稱完成。強制批次的完成不保證每次雲端辨識成功，失敗與額度警告必須如實回報。

@@ -65,7 +65,8 @@ def test_migration_backs_up_database_and_excel_before_schema_change(
         }
         version = connection.execute("SELECT MAX(version) FROM schema_version").fetchone()[0]
     assert {"analysis_mode", "force_generation", "force_prepared"} <= run_columns
-    assert version == LATEST_SCHEMA_VERSION == 2
+    assert version == LATEST_SCHEMA_VERSION == 3
+    assert "force_segment_targets" in tables
 
 
 def test_migration_is_idempotent(tmp_path: Path) -> None:

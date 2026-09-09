@@ -7,6 +7,7 @@ from openpyxl import load_workbook
 from media_catalog.database import CatalogDatabase
 from media_catalog.excel_catalog import (
     CATALOG_HEADERS,
+    ReviewedPathsError,
     read_reviewed_paths,
     write_excel,
 )
@@ -92,7 +93,8 @@ def test_write_excel_preserves_existing_workbook_when_atomic_replace_fails(
     tmp_path: Path, monkeypatch
 ) -> None:
     output = tmp_path / "媒體清冊.xlsx"
-    output.write_bytes(b"existing-workbook")
+    write_excel([], output)
+    original = output.read_bytes()
 
     def locked_replace(*_args, **_kwargs):
         raise PermissionError("workbook is open")
@@ -102,7 +104,7 @@ def test_write_excel_preserves_existing_workbook_when_atomic_replace_fails(
     with pytest.raises(PermissionError, match="open"):
         write_excel([], output)
 
-    assert output.read_bytes() == b"existing-workbook"
+    assert output.read_bytes() == original
     assert list(tmp_path.glob(".媒體清冊.*.tmp.xlsx")) == []
 
 
@@ -194,3 +196,42 @@ def test_gemini_warning_keeps_analysis_visible_for_manual_review(
         "本地備援",
     )
     assert row[11] == "Gemini 強化失敗:GeminiError"
+
+
+def test_corrupt_existing_catalog_is_not_overwritten(tmp_path: Path) -> None:
+    output = tmp_path / "catalog.xlsx"
+    output.write_bytes(b"damaged-review-data")
+    with pytest.raises(ReviewedPathsError):
+        write_excel([], output)
+    assert output.read_bytes() == b"damaged-review-data"
+
+
+def test_model_text_is_literal_not_excel_formula(tmp_path: Path) -> None:
+    database = CatalogDatabase(tmp_path / "catalog.sqlite")
+    record = database.upsert_discovered(tmp_path / "photo.jpg", "a", "image/jpeg")
+    record = database.save_analysis(record.id, description='=HYPERLINK("https://example.com","click")', highlights=("=1+1",), keywords=("=2+2",))
+    output = write_excel([record], tmp_path / "catalog.xlsx")
+    workbook = load_workbook(output)
+    try:
+        assert workbook.active.cell(2, 5).data_type == "s"
+        assert workbook.active.cell(2, 6).data_type == "s"
+        assert workbook.active.cell(2, 7).data_type == "s"
+    finally:
+        workbook.close()
+
+
+def test_review_status_survives_windows_path_case_changes(tmp_path: Path) -> None:
+    database = CatalogDatabase(tmp_path / "catalog.sqlite")
+    record = database.upsert_discovered(tmp_path / "photo.jpg", "a", "image/jpeg")
+    output = write_excel([record], tmp_path / "catalog.xlsx")
+    workbook = load_workbook(output)
+    workbook.active.cell(2, 1).value = "已審核"
+    workbook.active.cell(2, 3).value = str(record.path).upper()
+    workbook.save(output)
+    workbook.close()
+    write_excel([record], output)
+    workbook = load_workbook(output)
+    try:
+        assert workbook.active.cell(2, 1).value == "已審核"
+    finally:
+        workbook.close()

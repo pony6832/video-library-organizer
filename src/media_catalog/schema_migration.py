@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-LATEST_SCHEMA_VERSION = 2
+LATEST_SCHEMA_VERSION = 3
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,6 +135,12 @@ def _apply_schema(database_path: Path, applied_at: str) -> None:
                 segment_count INTEGER NOT NULL DEFAULT 0,
                 frame_count INTEGER NOT NULL DEFAULT 0,
                 updated_at TEXT NOT NULL
+            );
+            CREATE TABLE IF NOT EXISTS force_segment_targets (
+                run_id TEXT NOT NULL,
+                video_id TEXT NOT NULL,
+                segment_ids_json TEXT NOT NULL,
+                PRIMARY KEY(run_id, video_id)
             );
             """
         )

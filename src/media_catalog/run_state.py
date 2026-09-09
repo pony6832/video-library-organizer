@@ -549,6 +549,23 @@ class RunStateStore:
             connection.execute(
                 "DELETE FROM gemini_usage WHERE video_id = ?", (video_id,)
             )
+            connection.execute(
+                "DELETE FROM force_segment_targets WHERE video_id = ?", (video_id,)
+            )
+
+    def force_targets(self, run_id: str, video_id: str, candidates: tuple[str, ...]) -> tuple[str, ...]:
+        """Persist the exact target set before the first external request."""
+        with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            connection.execute(
+                "INSERT OR IGNORE INTO force_segment_targets VALUES (?, ?, ?)",
+                (run_id, video_id, json.dumps(candidates)),
+            )
+            row = connection.execute(
+                "SELECT segment_ids_json FROM force_segment_targets WHERE run_id = ? AND video_id = ?",
+                (run_id, video_id),
+            ).fetchone()
+        return tuple(json.loads(row[0]))
 
     def consume_gemini_slot(
         self,
