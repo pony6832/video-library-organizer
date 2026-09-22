@@ -74,7 +74,9 @@ def analyze_pending(
                 mode=mode,
             )
             active_run_id = run.run_id
-        run_state.clear_stop(active_run_id)
+            # A standalone invocation explicitly resumes work. Supplied worker
+            # runs inherit the supervisor's stop flag, including startup races.
+            run_state.clear_stop(active_run_id)
 
     force_eligible_ids: set[str] | None = None
     if mode is AnalysisMode.FORCE_GEMINI:

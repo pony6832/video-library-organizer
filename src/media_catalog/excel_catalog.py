@@ -98,7 +98,7 @@ def read_reviewed_paths_strict(excel_path: Path) -> set[str]:
         workbook = load_workbook(source, read_only=True, data_only=True)
     except PermissionError:
         raise
-    except (OSError, BadZipFile, InvalidFileException, ParseError) as error:
+    except (OSError, BadZipFile, InvalidFileException, ParseError, KeyError, ValueError) as error:
         raise ReviewedPathsError("Excel 媒體清冊無法讀取") from error
     try:
         if "媒體清冊" not in workbook.sheetnames:

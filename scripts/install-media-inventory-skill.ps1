@@ -6,6 +6,50 @@ param(
 $ErrorActionPreference = 'Stop'
 $env:PYTHONUTF8 = '1'
 $backupPath = $null
+$backupCreated = $false
+$installStarted = $false
+$failedPath = $null
+
+function Assert-ExactInstallPath([string]$Path, [string]$Parent, [string]$Name) {
+    if ([string]::IsNullOrWhiteSpace($Path) -or [string]::IsNullOrWhiteSpace($Parent)) {
+        throw 'Empty installation path'
+    }
+    $expected = Join-Path $Parent $Name
+    if ([IO.Path]::GetFullPath($Path) -ne $expected -or
+        (Split-Path -Parent $Path) -ne $Parent) {
+        throw "Installation path escaped expected parent: $Path"
+    }
+    $ancestor = Get-Item -LiteralPath $Parent -Force -ErrorAction Stop
+    while ($null -ne $ancestor) {
+        if ($ancestor.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+            throw "Reparse point in installation parent: $($ancestor.FullName)"
+        }
+        $ancestor = $ancestor.Parent
+    }
+    if (Test-Path -LiteralPath $Path) {
+        $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+        if (-not $item.PSIsContainer -or
+            ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            throw "Expected ordinary installation directory: $Path"
+        }
+    }
+}
+
+function Assert-NoReparseTree([string]$Path) {
+    $pending = New-Object 'System.Collections.Generic.Stack[string]'
+    $pending.Push($Path)
+    while ($pending.Count -gt 0) {
+        $current = Get-Item -LiteralPath $pending.Pop() -Force -ErrorAction Stop
+        if ($current.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+            throw "Refusing linked installation content: $($current.FullName)"
+        }
+        if ($current.PSIsContainer) {
+            foreach ($child in Get-ChildItem -LiteralPath $current.FullName -Force -ErrorAction Stop) {
+                $pending.Push($child.FullName)
+            }
+        }
+    }
+}
 
 try {
     $projectRootPath = (Resolve-Path -LiteralPath $ProjectRoot -ErrorAction Stop).Path
@@ -61,6 +105,7 @@ try {
     }
     $destinationParent = (Resolve-Path -LiteralPath $destinationParent -ErrorAction Stop).Path
     $destinationFull = Join-Path $destinationParent 'media-inventory'
+    Assert-ExactInstallPath $destinationFull $destinationParent 'media-inventory'
 
     $sourceResolved = (Resolve-Path -LiteralPath $sourceSkill -ErrorAction Stop).Path
     if ($destinationFull -eq $sourceResolved) {
@@ -81,9 +126,13 @@ try {
         if (Test-Path -LiteralPath $backupPath) {
             throw "備份路徑已存在，停止安裝：$backupPath"
         }
+        Assert-ExactInstallPath $backupPath $destinationParent ([IO.Path]::GetFileName($backupPath))
+        Assert-NoReparseTree $destinationFull
         Move-Item -LiteralPath $destinationFull -Destination $backupPath -ErrorAction Stop
+        $backupCreated = $true
     }
 
+    $installStarted = $true
     Copy-Item -LiteralPath $sourceResolved -Destination $destinationFull -Recurse -ErrorAction Stop
 
     $runtimeRoot = Join-Path $destinationFull '.runtime'
@@ -179,9 +228,33 @@ try {
     Write-Output "MEDIA_INVENTORY_SKILL_READY destination=$destinationFull backup=$backupLabel"
 }
 catch {
+    $installError = $_.Exception.Message
+    $rollbackError = 'none'
+    if ($installStarted) {
+        try {
+            Assert-ExactInstallPath $destinationFull $destinationParent 'media-inventory'
+            if (Test-Path -LiteralPath $destinationFull) {
+                $failedName = 'media-inventory.failed-' + [guid]::NewGuid().ToString('N')
+                $failedPath = Join-Path $destinationParent $failedName
+                Assert-ExactInstallPath $failedPath $destinationParent $failedName
+                if (Test-Path -LiteralPath $failedPath) { throw "Recovery path already exists: $failedPath" }
+                Assert-NoReparseTree $destinationFull
+                Move-Item -LiteralPath $destinationFull -Destination $failedPath -ErrorAction Stop
+            }
+            if ($backupCreated) {
+                Assert-ExactInstallPath $backupPath $destinationParent ([IO.Path]::GetFileName($backupPath))
+                if (-not (Test-Path -LiteralPath $backupPath -PathType Container)) { throw "Backup missing: $backupPath" }
+                if (Test-Path -LiteralPath $destinationFull) { throw "Restore destination is occupied: $destinationFull" }
+                Assert-NoReparseTree $backupPath
+                # Keep the backup intact even if restoring it fails partway.
+                Copy-Item -LiteralPath $backupPath -Destination $destinationFull -Recurse -ErrorAction Stop
+            }
+        }
+        catch { $rollbackError = $_.Exception.Message }
+    }
     $backupLabel = if ($null -eq $backupPath) { 'none' } else { $backupPath }
     [Console]::Error.WriteLine(
-        "MEDIA_INVENTORY_SKILL_ERROR backup=$backupLabel error=$($_.Exception.Message)"
+        "MEDIA_INVENTORY_SKILL_ERROR backup=$backupLabel failed=$failedPath rollback_error=$rollbackError error=$installError"
     )
     exit 1
 }

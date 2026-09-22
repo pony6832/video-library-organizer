@@ -1,6 +1,20 @@
 import os
 from pathlib import Path
 
+
+def test_strict_review_reader_normalizes_malformed_xlsx_zip(tmp_path):
+    import pytest
+    from zipfile import ZipFile
+    from media_catalog.excel_catalog import ReviewedPathsError, read_reviewed_paths_strict
+
+    source = tmp_path / "malformed.xlsx"
+    with ZipFile(source, "w") as archive:
+        archive.writestr("unrelated.txt", "not an Excel package")
+    original = source.read_bytes()
+    with pytest.raises(ReviewedPathsError):
+        read_reviewed_paths_strict(source)
+    assert source.read_bytes() == original
+
 import pytest
 from openpyxl import load_workbook
 

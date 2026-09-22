@@ -74,3 +74,33 @@ def test_failed_preflight_does_not_move_existing_installation(tmp_path, failure)
     assert marker.is_file(), 'Preflight failure moved the existing installation'
     assert marker.read_text() == 'preserve me'
     assert not list(tmp_path.glob('media-inventory.backup-*'))
+
+
+@pytest.mark.skipif(sys.platform != 'win32', reason='Windows installer')
+def test_failure_after_install_copy_restores_old_install_and_retains_evidence(tmp_path):
+    # Only external tool boundaries are replaced; real installer moves/copies real files.
+    powershell = shutil.which('powershell.exe')
+    (tmp_path / 'python.cmd').write_text(
+        '@if "%1"=="-m" exit /b 17\n@exit /b 0\n')
+    (tmp_path / 'node.cmd').write_text('@echo v22.0.0\n@exit /b 0\n')
+    (tmp_path / 'npm.cmd').write_text('@exit /b 0\n')
+    destination = tmp_path / 'media-inventory'
+    destination.mkdir()
+    marker = destination / 'user-data.txt'
+    marker.write_text('original user data')
+    result = subprocess.run(
+        [powershell, '-NoProfile', '-ExecutionPolicy', 'Bypass', '-File',
+         str(ROOT / 'scripts/install-media-inventory-skill.ps1'),
+         '-Destination', str(destination), '-ProjectRoot', str(ROOT)],
+        env=dict(os.environ, PATH=str(tmp_path)), capture_output=True, timeout=30)
+
+    assert result.returncode == 1
+    assert b'=17' in result.stderr
+    assert marker.is_file(), 'Late install failure did not restore original installation'
+    assert marker.read_text() == 'original user data'
+    backups = list(tmp_path.glob('media-inventory.backup-*'))
+    failed = list(tmp_path.glob('media-inventory.failed-*'))
+    assert len(backups) == len(failed) == 1
+    assert (backups[0] / 'user-data.txt').read_text() == 'original user data'
+    assert (failed[0] / 'SKILL.md').is_file()
+    assert (ROOT / 'skills/media-inventory/SKILL.md').is_file()

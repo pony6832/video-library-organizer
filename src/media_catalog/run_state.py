@@ -176,6 +176,7 @@ class RunStateStore:
 
         normalized_root = str(Path(root_path).resolve())
         with self._connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
                 """
                 SELECT * FROM analysis_runs
@@ -186,6 +187,23 @@ class RunStateStore:
                 """,
                 (normalized_root, AnalysisMode.FORCE_GEMINI.value),
             ).fetchone()
+            if row is not None:
+                connection.execute(
+                    """
+                    UPDATE analysis_runs
+                    SET video_count = ?, image_count = ?, total_bytes = ?,
+                        total_media = ?, updated_at = ?
+                    WHERE run_id = ?
+                    """,
+                    (video_count, image_count, total_bytes,
+                     video_count + image_count, _now(), row["run_id"]),
+                )
+                refreshed = connection.execute(
+                    "SELECT * FROM analysis_runs WHERE run_id = ?",
+                    (row["run_id"],),
+                ).fetchone()
+                run = self._to_run(refreshed)
+                return run, not run.force_prepared
             generation_row = connection.execute(
                 """
                 SELECT COALESCE(MAX(force_generation), 0)
@@ -194,10 +212,6 @@ class RunStateStore:
                 """,
                 (normalized_root, AnalysisMode.FORCE_GEMINI.value),
             ).fetchone()
-        if row is not None:
-            run = self._to_run(row)
-            return run, not run.force_prepared
-
         generation = int(generation_row[0]) + 1
         root_digest = hashlib.sha256(
             normalized_root.casefold().encode("utf-8")

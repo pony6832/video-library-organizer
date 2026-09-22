@@ -54,6 +54,23 @@ class ForceRuntime:
 LOCAL = Analysis("本地描述完整。", ("本地重點",), ("本地",))
 
 
+def test_supplied_stopped_force_run_never_calls_image_analysis(tmp_path):
+    workspace = _workspace_with_media(tmp_path, ("photo.jpg",))
+    store = RunStateStore(workspace.database_path)
+    run, _ = store.begin_run(root_path=workspace.root, video_count=0,
+                            image_count=1, total_bytes=9, mode=AnalysisMode.FORCE_GEMINI)
+    store.request_stop(run.run_id)
+    images = RecordingForceImages(ForceImageResult(LOCAL, None, True))
+
+    result = analyze_pending(workspace, ForceRuntime(store, images),
+                             mode=AnalysisMode.FORCE_GEMINI, run_id=run.run_id)
+
+    assert images.sources == []
+    assert result.analyzed == 0
+    assert result.remaining == 1
+    assert store.get_run(run.run_id).stop_requested is True
+
+
 def _workspace_with_media(
     tmp_path: Path, names: Sequence[str]
 ) -> MediaWorkspace:

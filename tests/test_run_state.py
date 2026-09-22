@@ -3,6 +3,23 @@ from __future__ import annotations
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+
+def test_resumed_force_run_refreshes_inventory_totals(tmp_path):
+    store = RunStateStore(tmp_path / "state.sqlite")
+    first, _ = store.begin_run(root_path=tmp_path, video_count=1, image_count=0,
+                              total_bytes=10, mode=AnalysisMode.FORCE_GEMINI)
+    store.mark_force_prepared(first.run_id)
+    store.request_stop(first.run_id)
+    resumed, prepare = store.begin_run(root_path=tmp_path, video_count=2, image_count=0,
+                                      total_bytes=20, mode=AnalysisMode.FORCE_GEMINI)
+    assert resumed.total_media == 2
+    assert resumed.video_count == 2
+    assert resumed.total_bytes == 20
+    assert resumed.run_id == first.run_id
+    assert resumed.stop_requested is True
+    assert prepare is False
+    assert RunStateStore(store.path).get_run(first.run_id).total_media == 2
+
 from media_catalog.analysis_mode import AnalysisMode
 from media_catalog.run_state import RunStateStore, VideoSegment
 
