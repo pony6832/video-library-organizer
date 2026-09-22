@@ -23,7 +23,7 @@ from .workspace import MediaWorkspace, WorkspacePathError
 
 def format_force_confirmation(estimate: ForceGeminiEstimate) -> str:
     return (
-        "即將使用 Gemini 3.7 Flash 強化未審核媒體：\n\n"
+        "即將使用可用的 Gemini 模型強化未審核媒體：\n\n"
         f"影片：{estimate.video_count}\n"
         f"照片：{estimate.image_count}\n"
         f"已審核：{estimate.reviewed_count}（略過）\n\n"

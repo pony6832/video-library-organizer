@@ -100,6 +100,16 @@ def test_preflight_hides_windows_console_processes() -> None:
     )
 
 
+def test_frozen_runtime_never_runs_watch_python_script(tmp_path, monkeypatch):
+    import sys
+    monkeypatch.setattr(sys, 'frozen', True, raising=False)
+    runner, calls = _runner()
+    analyzer = build_local_analyzer(skill_root=_skill_tree(tmp_path),
+        workspace=_workspace(tmp_path), model='qwen3-vl:8b-instruct', runner=runner)
+    assert analyzer.video_extractor.primary is None
+    assert not any('--check' in command for command in calls)
+
+
 def test_build_runtime_resolves_watch_and_pinned_private_mcp(
     tmp_path: Path,
 ) -> None:

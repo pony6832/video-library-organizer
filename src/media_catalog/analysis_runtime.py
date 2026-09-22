@@ -105,7 +105,7 @@ def build_local_analyzer(
     watch_script = watch_scripts / "watch.py"
     watch_setup = watch_scripts / "setup.py"
     watch = None
-    if watch_script.is_file() and watch_setup.is_file():
+    if not getattr(sys, 'frozen', False) and watch_script.is_file() and watch_setup.is_file():
         watch_check = _preflight(
             runner,
             [python_executable, str(watch_setup), "--check"],

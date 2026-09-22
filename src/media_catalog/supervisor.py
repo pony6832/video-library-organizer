@@ -25,6 +25,12 @@ class WorkerProcess(Protocol):
     def communicate(self) -> tuple[object, object]: ...
 
 
+def build_worker_command(*, frozen: bool, executable: str, root: Path,
+                         catalog: bool = False, video_only: bool = True) -> list[str]:
+    prefix = [executable, '--catalog' if catalog else '--worker'] if frozen else [executable, '-m', 'media_catalog.cli']
+    return prefix + ['start' if catalog else 'analyze-all', str(root)] + (['--video-only'] if video_only else [])
+
+
 @dataclass(frozen=True, slots=True)
 class SupervisorSnapshot:
     status: str
@@ -146,15 +152,8 @@ class WorkerSupervisor:
         self._catalog_terminal_status = None
         self._catalog_exit_code = None
         self._catalog_error_text = ""
-        arguments = [
-            self.python_executable,
-            "-m",
-            "media_catalog.cli",
-            "start",
-            str(workspace.root),
-        ]
-        if video_only:
-            arguments.append("--video-only")
+        arguments = build_worker_command(frozen=bool(getattr(sys, 'frozen', False)),
+            executable=self.python_executable, root=workspace.root, catalog=True, video_only=video_only)
         self.catalog_process = self.catalog_process_factory(arguments)
         return int(getattr(self.catalog_process, "pid", 1))
 
@@ -194,12 +193,8 @@ class WorkerSupervisor:
         self.workspace = workspace
         self.store = store
         self.run_id = run.run_id
-        self.arguments = [
-            self.python_executable,
-            "-m",
-            "media_catalog.cli",
-            "analyze-all",
-            str(workspace.root),
+        self.arguments = build_worker_command(frozen=bool(getattr(sys, 'frozen', False)),
+            executable=self.python_executable, root=workspace.root, video_only=False) + [
             "--skill-root",
             str(Path(skill_root).resolve()),
             "--mode",
