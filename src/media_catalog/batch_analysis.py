@@ -88,16 +88,41 @@ def analyze_pending(
         run_state.set_gemini_error(active_run_id, None)
     if gemini_client is not None and gemini_client.is_configured:
         try:
-            selected_model = gemini_client.discover_model()
+            discovery_heartbeat = (
+                HeartbeatThread(run_state, active_run_id)
+                if run_state is not None and active_run_id is not None
+                else nullcontext()
+            )
+            with discovery_heartbeat:
+                selected_model = gemini_client.discover_model()
         except Exception as error:
-            if mode is AnalysisMode.FORCE_GEMINI:
-                raise AnalysisError(f"Gemini model discovery failed: {error}") from error
-            gemini_client.discovery_error = str(error)
+            safe_error = sanitize_error(str(error))
             if run_state is not None and active_run_id is not None:
-                run_state.set_gemini_error(active_run_id, str(error))
+                run_state.set_gemini_error(active_run_id, safe_error)
+            if mode is AnalysisMode.FORCE_GEMINI:
+                raise AnalysisError(f"Gemini model discovery failed: {safe_error}") from error
+            gemini_client.discovery_error = safe_error
         else:
             if run_state is not None and active_run_id is not None:
                 run_state.set_gemini_model(active_run_id, selected_model)
+
+    if run_state is not None and active_run_id is not None:
+        active_run = run_state.get_run(active_run_id)
+        if active_run is not None and active_run.stop_requested:
+            run_state.update_counts(
+                active_run_id,
+                completed_media=sum(has_complete_analysis(r) for r in initial_records),
+                failed_media=sum(r.status is Status.FAILED for r in initial_records),
+                current_media_id=None,
+                current_segment_id=None,
+                status="incomplete",
+            )
+            return BatchAnalysisResult(
+                analyzed=0,
+                failed=sum(r.status is Status.FAILED for r in initial_records),
+                skipped=len(initial_records),
+                remaining=sum(not has_complete_analysis(r) for r in initial_records),
+            )
 
     force_eligible_ids: set[str] | None = None
     if mode is AnalysisMode.FORCE_GEMINI:

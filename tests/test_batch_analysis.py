@@ -95,6 +95,68 @@ def test_video_only_batch_leaves_photo_pending_and_counts_only_video(tmp_path: P
     assert records["photo.jpg"].status is Status.PENDING
 
 
+def test_discovery_has_heartbeat_and_honors_stop_before_analysis(tmp_path: Path) -> None:
+    workspace = _workspace_with_media(tmp_path, ("clip.mp4",))
+    store = RunStateStore(workspace.database_path)
+
+    class DiscoveringClient:
+        is_configured = True
+        discovery_error = None
+
+        def discover_model(self):
+            import time
+            deadline = time.monotonic() + 2
+            while time.monotonic() < deadline:
+                run = store.get_run(store.run_id_for_root(workspace.root))
+                if run and run.last_heartbeat:
+                    store.request_stop(run.run_id)
+                    return "gemini-3.8-flash"
+                time.sleep(0.01)
+            raise AssertionError("discovery had no heartbeat")
+
+    client = DiscoveringClient()
+
+    class Pipeline:
+        gemini_client = client
+
+        def analyze_video(self, *_args, **_kwargs):
+            raise AssertionError("stopped run must not analyze")
+
+    class Runtime(PathAwareAnalyzer):
+        run_state = store
+        segment_pipeline = Pipeline()
+
+    result = analyze_pending(workspace, Runtime(), video_only=True)
+    assert result.remaining == 1
+    assert store.get_run(store.run_id_for_root(workspace.root)).status == "incomplete"
+
+
+def test_force_discovery_failure_is_persisted_before_raise(tmp_path: Path) -> None:
+    workspace = _workspace_with_media(tmp_path, ("clip.mp4",))
+    store = RunStateStore(workspace.database_path)
+    run, _ = store.begin_run(root_path=workspace.root, video_count=1, image_count=0,
+                             total_bytes=8, mode=AnalysisMode.FORCE_GEMINI)
+
+    class FailingClient:
+        is_configured = True
+        discovery_error = None
+
+        def discover_model(self):
+            raise RuntimeError("directory unavailable")
+
+    class Pipeline:
+        gemini_client = FailingClient()
+
+    class Runtime(PathAwareAnalyzer):
+        run_state = store
+        segment_pipeline = Pipeline()
+
+    with pytest.raises(AnalysisError, match="directory unavailable"):
+        analyze_pending(workspace, Runtime(), mode=AnalysisMode.FORCE_GEMINI,
+                        run_id=run.run_id, video_only=True)
+    assert "directory unavailable" in store.get_run(run.run_id).gemini_error
+
+
 def test_analyze_pending_continues_after_one_item_fails_and_updates_excel(
     tmp_path: Path,
 ) -> None:
