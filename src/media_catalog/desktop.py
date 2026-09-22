@@ -177,6 +177,8 @@ class DesktopApplication(StatusApplication):
 
     def _render(self, model):
         super()._render(model)
+        if model.progress_text.startswith('清冊已收錄'):
+            self.progress_var.set(model.progress_text)
         self.counts_var.set(f'影片：{model.video_count}　容量：{model.total_size_text}　（不新增或分析照片）')
         self.status_var.set(model.status_text.replace('worker', '分析程序'))
 
@@ -189,6 +191,8 @@ class DesktopApplication(StatusApplication):
             records = [r for r in CatalogDatabase(self.workspace.database_path).list_records() if r.media_type.startswith('video/')]
             model = StatusViewModel.without_run(status_text=model.status_text, root_text=model.root_text,
                 video_count=len(records), total_bytes=sum(r.path.stat().st_size for r in records if r.path.is_file()))
+            model = replace(model, progress_text=f'清冊已收錄 {len(records)} 部影片；尚未開始本次分析',
+                remaining_text='啟動分析後計算')
         self.cloud_var.set(cloud_status(snapshot.run))
         return model
 
@@ -200,6 +204,10 @@ class DesktopApplication(StatusApplication):
         self.mode_box.configure(state='disabled' if busy else 'readonly')
         self.key_entry.configure(state='disabled' if busy else 'normal')
         self.setup_button.configure(state='disabled' if busy else 'normal')
+        setup_window = getattr(self, 'setup_window', None)
+        if setup_window is not None and setup_window.winfo_exists():
+            for button in (self.check_button, self.install_button):
+                button.configure(state='disabled' if busy else 'normal')
         has_outputs = bool(self.workspace and self.workspace.excel_path.is_file())
         for button in (self.excel_button, self.result_button):
             button.configure(state='normal' if has_outputs else 'disabled')
@@ -225,9 +233,10 @@ class DesktopApplication(StatusApplication):
         self.install_button = self.ttk.Button(buttons, text='安裝缺少元件', command=lambda: self._setup_job(True))
         self.install_button.pack(side='left', padx=8)
         window.protocol('WM_DELETE_WINDOW', lambda: None if self.setup_busy else window.destroy())
+        self._apply_control_state()
 
     def _setup_job(self, install):
-        if self.setup_busy:
+        if self.setup_busy or self.supervisor.is_busy:
             return
         self.setup_busy = True
         self.check_button.configure(state='disabled')

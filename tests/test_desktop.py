@@ -176,3 +176,78 @@ def test_npm_failure_identifies_child_node_resolution(tmp_path):
         returncode=1, stdout='', stderr="'node' is not recognized as an internal or external command"))
     with pytest.raises(RuntimeError, match='Node.js'):
         setup._execute(['npm.cmd', 'install'], 10)
+
+
+def test_existing_setup_dialog_is_disabled_when_analysis_starts(tmp_path, monkeypatch):
+    import tkinter as tk
+    import media_catalog.desktop as desktop
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        supervisor = Mock(is_busy=False)
+        app = desktop.DesktopApplication(root, skill_root=tmp_path, supervisor=supervisor)
+        app._setup_dialog()
+        supervisor.is_busy = True
+        app._apply_control_state()
+        assert str(app.check_button.cget('state')) == 'disabled'
+        assert str(app.install_button.cget('state')) == 'disabled'
+        supervisor.is_busy = False
+        app._apply_control_state()
+        assert str(app.install_button.cget('state')) == 'normal'
+    finally:
+        root.destroy()
+
+
+def test_setup_handler_cannot_start_during_analysis(tmp_path, monkeypatch):
+    import tkinter as tk
+    import media_catalog.desktop as desktop
+    root = tk.Tk()
+    root.withdraw()
+    thread = Mock()
+    monkeypatch.setattr(desktop.threading, 'Thread', thread)
+    try:
+        supervisor = Mock(is_busy=False)
+        app = desktop.DesktopApplication(root, skill_root=tmp_path, supervisor=supervisor)
+        app._setup_dialog()
+        supervisor.is_busy = True
+        app._setup_job(True)
+        app._setup_job(False)
+        assert not app.setup_busy
+        thread.assert_not_called()
+    finally:
+        root.destroy()
+
+
+def test_setup_repairs_missing_companions(tmp_path):
+    from media_catalog.setup_environment import EnvironmentSetup, MODEL
+    calls = []
+    def runner(args, **kwargs):
+        calls.append(args)
+        return Mock(returncode=0, stdout=MODEL if args[-1] == 'list' else '', stderr='')
+    package = tmp_path / '.tools/mcp-video-analyzer/node_modules/mcp-video-analyzer/package.json'
+    package.parent.mkdir(parents=True)
+    package.write_text('{}')
+    setup = EnvironmentSetup(tmp_path,
+        which=lambda name: None if name in ('ffprobe', 'npm') else name,
+        runner=runner)
+    result = setup.install(lambda message: None)
+    repairs = [command for command in calls if command[0] == 'winget']
+    assert len(repairs) == 2
+    assert {command[command.index('--id') + 1] for command in repairs} == {'Gyan.FFmpeg', 'OpenJS.NodeJS.LTS'}
+    assert all('--force' in command for command in repairs)
+    assert not result['ready']
+
+
+def test_fresh_catalog_progress_is_inventory_not_false_zero_total(tmp_path):
+    from media_catalog.bootstrap import bootstrap_workspace
+    from media_catalog.desktop import DesktopApplication
+    from media_catalog.supervisor import SupervisorSnapshot
+    (tmp_path / 'clip.mp4').write_bytes(b'video')
+    app = DesktopApplication.__new__(DesktopApplication)
+    app.workspace = bootstrap_workspace(tmp_path).workspace
+    app.media_root = tmp_path
+    app.cloud_var = Mock()
+    model = app._view_model(SupervisorSnapshot('catalog_ready', False, None))
+    assert '已收錄 1' in model.progress_text
+    assert '尚未開始' in model.progress_text
+    assert model.remaining_text != '0'

@@ -86,12 +86,20 @@ class EnvironmentSetup:
 
     def install(self, progress):
         report = self.check()
-        for tool, package in [('ffmpeg', 'Gyan.FFmpeg'), ('node', 'OpenJS.NodeJS.LTS'), ('ollama', 'Ollama.Ollama')]:
-            if report['checks'][tool]:
+        groups = [(('ffmpeg', 'ffprobe'), 'Gyan.FFmpeg'),
+                  (('node', 'npm'), 'OpenJS.NodeJS.LTS'),
+                  (('ollama',), 'Ollama.Ollama')]
+        for tools, package in groups:
+            if all(report['checks'][tool] for tool in tools):
                 continue
-            progress(f'正在安裝 {tool}，若 Windows 顯示權限確認請允許；可能需要數分鐘。')
-            self._execute(['winget', 'install', '--exact', '--id', package,
-                '--accept-package-agreements', '--accept-source-agreements', '--silent'], 1200)
+            repair = any(report['checks'][tool] for tool in tools)
+            action = '修復／重新安裝' if repair else '安裝'
+            progress(f'正在{action} {" + ".join(tools)}，若 Windows 顯示權限確認請允許；可能需要數分鐘。')
+            command = ['winget', 'install', '--exact', '--id', package,
+                '--accept-package-agreements', '--accept-source-agreements', '--silent']
+            if repair:
+                command.append('--force')
+            self._execute(command, 1200)
         refresh_tool_path()
         npm, ollama = self.which('npm'), self.which('ollama')
         if npm and not report['checks']['mcp-video-analyzer']:
