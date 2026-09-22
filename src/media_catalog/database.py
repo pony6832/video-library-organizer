@@ -122,42 +122,45 @@ class CatalogDatabase:
             ).fetchall()
         return [self._to_record(row) for row in rows]
 
-    def requeue_processing(self) -> int:
+    def requeue_processing(self, *, video_only: bool = False) -> int:
         with self._connect() as connection:
             cursor = connection.execute(
                 """
                 UPDATE media_records
                 SET status = ?, error = NULL, updated_at = ?
-                WHERE status = ?
+                WHERE status = ? AND (? = 0 OR media_type LIKE 'video/%')
                 """,
                 (
                     Status.PENDING.value,
                     _now(),
                     Status.PROCESSING.value,
+                    int(video_only),
                 ),
             )
         return cursor.rowcount
 
-    def requeue_failed(self) -> int:
+    def requeue_failed(self, *, video_only: bool = False) -> int:
         with self._connect() as connection:
             cursor = connection.execute(
                 """
                 UPDATE media_records
                 SET status = ?, error = NULL, updated_at = ?
-                WHERE status = ?
+                WHERE status = ? AND (? = 0 OR media_type LIKE 'video/%')
                 """,
                 (
                     Status.PENDING.value,
                     _now(),
                     Status.FAILED.value,
+                    int(video_only),
                 ),
             )
         return cursor.rowcount
 
-    def requeue_incomplete_analysis(self) -> int:
+    def requeue_incomplete_analysis(self, *, video_only: bool = False) -> int:
         incomplete = [
             record
             for record in self.list_records()
+            if not video_only or record.media_type.startswith('video/')
             if record.status is Status.SKIPPED
             or (
                 record.status in {Status.ANALYZED, Status.COMPLETED}

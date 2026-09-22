@@ -16,7 +16,7 @@ class BootstrapResult:
     total_records: int
 
 
-def bootstrap_workspace(root: Path) -> BootstrapResult:
+def bootstrap_workspace(root: Path, *, video_only: bool = False) -> BootstrapResult:
     workspace = MediaWorkspace.from_root(root)
     workspace.ensure_directories()
 
@@ -25,6 +25,7 @@ def bootstrap_workspace(root: Path) -> BootstrapResult:
         workspace.root,
         database,
         excluded_roots=(workspace.result_root,),
+        video_only=video_only,
     )
     records = database.list_records()
     write_excel(records, workspace.excel_path)
@@ -32,5 +33,5 @@ def bootstrap_workspace(root: Path) -> BootstrapResult:
     return BootstrapResult(
         workspace=workspace,
         scan=scan_result,
-        total_records=len(records),
+        total_records=sum(r.media_type.startswith("video/") for r in records) if video_only else len(records),
     )

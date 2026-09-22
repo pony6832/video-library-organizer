@@ -15,9 +15,6 @@ from .stage_runner import StagePolicy, StageRunner
 def validate_force_environment(environ: Mapping[str, str]) -> str | None:
     if not environ.get("GEMINI_API_KEY", "").strip():
         return "尚未設定 Gemini API Key，無法啟動強制強化。"
-    model = environ.get("GEMINI_MODEL", "").strip()
-    if model and model != "gemini-3.7-flash":
-        return "強制模式僅允許使用 gemini-3.7-flash 模型。"
     return None
 
 
@@ -123,14 +120,14 @@ def _normalized_path(value: str | Path) -> str:
 
 
 def plan_force_run(
-    records: Iterable[MediaRecord], reviewed_paths: set[str]
+    records: Iterable[MediaRecord], reviewed_paths: set[str], *, video_only: bool = False
 ) -> tuple[ForceGeminiEstimate, tuple[str, ...]]:
     reviewed = {_normalized_path(item) for item in reviewed_paths}
     catalog = tuple(records)
     supported = tuple(
         item
         for item in catalog
-        if item.media_type.startswith(("image/", "video/"))
+        if item.media_type.startswith("video/") or (not video_only and item.media_type.startswith("image/"))
     )
     eligible = tuple(
         item

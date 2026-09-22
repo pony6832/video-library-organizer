@@ -7,6 +7,7 @@ import os
 import re
 import urllib.error
 import urllib.request
+import urllib.parse
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Protocol
@@ -14,7 +15,6 @@ from typing import Protocol
 from .inference import Analysis, AnalysisError, LocalAnalyzer
 
 
-DEFAULT_MODEL = "gemini-3.7-flash"
 DEFAULT_TIMEOUT_SECONDS = 90.0
 _MODEL_NAME = re.compile(r"^[A-Za-z0-9._-]+$")
 
@@ -31,6 +31,7 @@ class GeminiSegmentRequest:
 
 
 class GeminiTransport(Protocol):
+    def get(self, url: str, *, headers: dict[str, str], timeout: float) -> dict[str, object]: ...
     def send(
         self,
         url: str,
@@ -42,6 +43,21 @@ class GeminiTransport(Protocol):
 
 
 class UrllibGeminiTransport:
+    def get(self, url: str, *, headers: dict[str, str], timeout: float) -> dict[str, object]:
+        request = urllib.request.Request(url, headers=headers, method="GET")
+        try:
+            with urllib.request.urlopen(request, timeout=timeout) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except urllib.error.HTTPError as error:
+            raise RuntimeError(f"HTTP {error.code}") from error
+        except urllib.error.URLError as error:
+            raise RuntimeError(f"network {type(error.reason).__name__}") from error
+        except json.JSONDecodeError as error:
+            raise RuntimeError("provider returned invalid JSON") from error
+        if not isinstance(payload, dict):
+            raise RuntimeError("provider returned a non-object response")
+        return payload
+
     def send(
         self,
         url: str,
@@ -79,16 +95,54 @@ class GeminiClient:
     ) -> None:
         self.transport = transport or UrllibGeminiTransport()
         self.timeout_seconds = timeout_seconds
+        self.model: str | None = None
+        self.discovery_error: str | None = None
+
+    def discover_model(self) -> str:
+        from .model_catalog import select_latest_stable_flash
+
+        key = os.getenv("GEMINI_API_KEY", "").strip()
+        if not key:
+            raise GeminiError("GEMINI_API_KEY is not configured")
+        models: list[dict[str, object]] = []
+        token = ""
+        seen: set[str] = set()
+        try:
+            while True:
+                url = "https://generativelanguage.googleapis.com/v1beta/models?pageSize=1000"
+                if token:
+                    url += "&pageToken=" + urllib.parse.quote(token, safe="")
+                payload = self.transport.get(url, headers={"x-goog-api-key": key}, timeout=self.timeout_seconds)
+                page = payload.get("models")
+                if not isinstance(page, list):
+                    raise GeminiError("Gemini model list response is invalid")
+                models.extend(item for item in page if isinstance(item, dict))
+                next_token = payload.get("nextPageToken", "")
+                if not isinstance(next_token, str):
+                    raise GeminiError("Gemini model list page token is invalid")
+                if not next_token:
+                    break
+                if next_token in seen:
+                    raise GeminiError("Gemini model list pagination loop")
+                seen.add(next_token)
+                token = next_token
+            self.model = select_latest_stable_flash(models)
+            return self.model
+        except GeminiError:
+            raise
+        except Exception as error:
+            message = (str(error).splitlines() or [type(error).__name__])[0].replace(key, "[REDACTED]")[:240]
+            raise GeminiError(f"Gemini model discovery failed: {message}") from error
 
     @property
     def is_configured(self) -> bool:
-        return bool(os.getenv("GEMINI_API_KEY", "").strip())
+        return bool(os.getenv("GEMINI_API_KEY", "").strip()) and self.discovery_error is None
 
     def analyze(self, request: GeminiSegmentRequest) -> Analysis:
         key = os.getenv("GEMINI_API_KEY", "").strip()
         if not key:
             raise GeminiError("GEMINI_API_KEY is not configured")
-        model = os.getenv("GEMINI_MODEL", DEFAULT_MODEL).strip() or DEFAULT_MODEL
+        model = self.model or self.discover_model()
         if _MODEL_NAME.fullmatch(model) is None:
             raise GeminiError("GEMINI_MODEL contains unsupported characters")
         if not 1 <= len(request.frames) <= 3:

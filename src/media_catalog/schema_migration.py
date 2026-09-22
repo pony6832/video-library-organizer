@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-LATEST_SCHEMA_VERSION = 3
+LATEST_SCHEMA_VERSION = 4
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,6 +151,8 @@ def _apply_schema(database_path: Path, applied_at: str) -> None:
             )
         }
         additions = {
+            "gemini_model": "ALTER TABLE analysis_runs ADD COLUMN gemini_model TEXT",
+            "gemini_error": "ALTER TABLE analysis_runs ADD COLUMN gemini_error TEXT",
             "analysis_mode": (
                 "ALTER TABLE analysis_runs ADD COLUMN analysis_mode "
                 "TEXT NOT NULL DEFAULT 'auto'"

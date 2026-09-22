@@ -85,6 +85,16 @@ def _workspace_with_media(
     return workspace
 
 
+def test_video_only_batch_leaves_photo_pending_and_counts_only_video(tmp_path: Path) -> None:
+    workspace = _workspace_with_media(tmp_path, ("photo.jpg", "clip.mp4"))
+    analyzer = PathAwareAnalyzer()
+    result = analyze_pending(workspace, analyzer, video_only=True)
+    records = {r.path.name: r for r in CatalogDatabase(workspace.database_path).list_records()}
+    assert result == BatchAnalysisResult(analyzed=1, failed=0, skipped=0, remaining=0)
+    assert analyzer.sources == [workspace.root / "clip.mp4"]
+    assert records["photo.jpg"].status is Status.PENDING
+
+
 def test_analyze_pending_continues_after_one_item_fails_and_updates_excel(
     tmp_path: Path,
 ) -> None:

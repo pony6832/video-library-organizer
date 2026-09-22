@@ -131,7 +131,7 @@ class WorkerSupervisor:
             for process in processes
         )
 
-    def start_catalog(self, root: Path, skill_root: Path) -> int:
+    def start_catalog(self, root: Path, skill_root: Path, *, video_only: bool = False) -> int:
         if self.is_busy:
             return self._active_process_id()
         workspace = MediaWorkspace.from_root(root)
@@ -153,6 +153,8 @@ class WorkerSupervisor:
             "start",
             str(workspace.root),
         ]
+        if video_only:
+            arguments.append("--video-only")
         self.catalog_process = self.catalog_process_factory(arguments)
         return int(getattr(self.catalog_process, "pid", 1))
 
@@ -162,6 +164,7 @@ class WorkerSupervisor:
         skill_root: Path,
         *,
         mode: AnalysisMode = AnalysisMode.AUTO,
+        video_only: bool = False,
     ) -> int:
         if self.process is not None and self.process.poll() is None:
             return self._process_id()
@@ -171,7 +174,7 @@ class WorkerSupervisor:
                 f"找不到既有媒體清冊，請先建立清冊：{workspace.result_root}"
             )
         store = self.store_factory(workspace)
-        records = CatalogDatabase(workspace.database_path).list_records()
+        records = [r for r in CatalogDatabase(workspace.database_path).list_records() if not video_only or r.media_type.startswith("video/")]
         run, _ = store.begin_run(
             root_path=workspace.root,
             video_count=sum(
@@ -204,6 +207,8 @@ class WorkerSupervisor:
             "--run-id",
             run.run_id,
         ]
+        if video_only:
+            self.arguments.append("--video-only")
         self._catalog_terminal_status = None
         self._restart_used = False
         self._safe_stop_requested = False

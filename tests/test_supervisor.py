@@ -103,6 +103,19 @@ def test_start_catalog_launches_refresh_without_creating_workspace_on_ui_thread(
     assert supervisor.is_busy is True
 
 
+def test_video_only_supervisor_passes_scope_to_worker(tmp_path: Path) -> None:
+    root = tmp_path / "media"
+    root.mkdir()
+    (root / "photo.jpg").write_bytes(b"image")
+    (root / "clip.mp4").write_bytes(b"video")
+    bootstrap_workspace(root)
+    factory = ProcessFactory([FakeProcess()])
+    supervisor = WorkerSupervisor(process_factory=factory)
+    supervisor.start(root, tmp_path / "skill", video_only=True)
+    assert "--video-only" in factory.arguments[0]
+    assert supervisor.store.get_run(supervisor.run_id).total_media == 1
+
+
 def test_successful_catalog_waits_for_user_mode_choice(tmp_path: Path) -> None:
     root = tmp_path / "中文 & media"
     root.mkdir()

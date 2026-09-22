@@ -44,9 +44,13 @@ def analyze_pending(
     mode: AnalysisMode = AnalysisMode.AUTO,
     run_id: str | None = None,
     reviewed_paths: set[str] | None = None,
+    video_only: bool = False,
 ) -> BatchAnalysisResult:
     database = CatalogDatabase(workspace.database_path)
-    initial_records = database.list_records()
+    def scoped_records() -> list[MediaRecord]:
+        return [r for r in database.list_records() if not video_only or r.media_type.startswith("video/")]
+
+    initial_records = scoped_records()
     analyzed = 0
     completed = 0
     run_state = getattr(analyzer, "run_state", None)
@@ -78,12 +82,29 @@ def analyze_pending(
             # runs inherit the supervisor's stop flag, including startup races.
             run_state.clear_stop(active_run_id)
 
+    gemini_client = getattr(segment_pipeline, "gemini_client", None)
+    if run_state is not None and active_run_id is not None and gemini_client is not None:
+        run_state.set_gemini_model(active_run_id, None)
+        run_state.set_gemini_error(active_run_id, None)
+    if gemini_client is not None and gemini_client.is_configured:
+        try:
+            selected_model = gemini_client.discover_model()
+        except Exception as error:
+            if mode is AnalysisMode.FORCE_GEMINI:
+                raise AnalysisError(f"Gemini model discovery failed: {error}") from error
+            gemini_client.discovery_error = str(error)
+            if run_state is not None and active_run_id is not None:
+                run_state.set_gemini_error(active_run_id, str(error))
+        else:
+            if run_state is not None and active_run_id is not None:
+                run_state.set_gemini_model(active_run_id, selected_model)
+
     force_eligible_ids: set[str] | None = None
     if mode is AnalysisMode.FORCE_GEMINI:
         if run_state is None or active_run_id is None:
             raise AnalysisError("force Gemini mode requires persistent run state")
         estimate, eligible_ids = plan_force_run(
-            initial_records, reviewed_paths or set()
+            initial_records, reviewed_paths or set(), video_only=video_only
         )
         del estimate
         force_eligible_ids = set(eligible_ids)
@@ -106,7 +127,7 @@ def analyze_pending(
                     )
             database.requeue_for_force(eligible_ids)
             run_state.mark_force_prepared(active_run_id)
-            initial_records = database.list_records()
+            initial_records = scoped_records()
         else:
             recoverable_ids = tuple(
                 record.id
@@ -124,7 +145,7 @@ def analyze_pending(
             )
             if recoverable_ids:
                 database.requeue_for_force(recoverable_ids)
-                initial_records = database.list_records()
+                initial_records = scoped_records()
 
     pending = [
         record
@@ -182,7 +203,7 @@ def analyze_pending(
     def update_run(current_media_id: str | None = None) -> None:
         if run_state is None or active_run_id is None:
             return
-        records = database.list_records()
+        records = scoped_records()
         durable_completed = completed_count(records)
         current_failed_count = failed_count(records)
         run_state.update_counts(
@@ -237,6 +258,8 @@ def analyze_pending(
                         record, active_run_id, mode=mode
                     )
                     warning = result.warning
+                    if gemini_client is not None and gemini_client.discovery_error:
+                        warning = f"Gemini model discovery failed: {gemini_client.discovery_error}"
                 elif mode is AnalysisMode.FORCE_GEMINI:
                     forced = analyzer.force_image_analyzer.analyze(record.path)
                     result = forced.analysis
@@ -274,14 +297,14 @@ def analyze_pending(
 
         sync_excel()
 
-    failed = failed_count(database.list_records())
+    final_records = scoped_records()
+    failed = failed_count(final_records)
     remaining = sum(
         not has_complete_analysis(record)
-        for record in database.list_records()
+        for record in final_records
         if force_eligible_ids is None or record.id in force_eligible_ids
     )
     if run_state is not None and active_run_id is not None:
-        final_records = database.list_records()
         run_state.update_counts(
             active_run_id,
             completed_media=completed_count(final_records),

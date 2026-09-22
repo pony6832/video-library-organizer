@@ -65,8 +65,25 @@ def test_migration_backs_up_database_and_excel_before_schema_change(
         }
         version = connection.execute("SELECT MAX(version) FROM schema_version").fetchone()[0]
     assert {"analysis_mode", "force_generation", "force_prepared"} <= run_columns
-    assert version == LATEST_SCHEMA_VERSION == 3
+    assert version == LATEST_SCHEMA_VERSION == 4
     assert "force_segment_targets" in tables
+
+
+def test_existing_v3_database_adds_model_metadata_without_losing_rows(tmp_path: Path) -> None:
+    database_path, excel_path = _make_legacy_catalog(tmp_path)
+    ensure_a_plus_schema(database_path, excel_path)
+    with sqlite3.connect(database_path) as connection:
+        connection.execute("ALTER TABLE analysis_runs DROP COLUMN gemini_model")
+        connection.execute("DELETE FROM schema_version WHERE version = 4")
+        connection.execute("INSERT INTO schema_version(version, applied_at) VALUES (3, 'old')")
+    result = ensure_a_plus_schema(database_path, excel_path)
+    with sqlite3.connect(database_path) as connection:
+        columns = {row[1] for row in connection.execute("PRAGMA table_info(analysis_runs)")}
+        count = connection.execute("SELECT COUNT(*) FROM media_records").fetchone()[0]
+    assert result.migrated is True
+    assert result.backup_dir is not None
+    assert "gemini_model" in columns
+    assert count == 1
 
 
 def test_migration_is_idempotent(tmp_path: Path) -> None:

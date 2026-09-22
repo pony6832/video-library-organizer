@@ -37,6 +37,8 @@ class AnalysisRun:
     analysis_mode: AnalysisMode = AnalysisMode.AUTO
     force_generation: int = 0
     force_prepared: bool = True
+    gemini_model: str | None = None
+    gemini_error: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -246,6 +248,22 @@ class RunStateStore:
                 "SELECT * FROM analysis_runs WHERE run_id = ?", (run_id,)
             ).fetchone()
         return self._to_run(row) if row is not None else None
+
+    def set_gemini_model(self, run_id: str, model: str | None) -> None:
+        with self._connect() as connection:
+            cursor = connection.execute(
+                "UPDATE analysis_runs SET gemini_model = ?, updated_at = ? WHERE run_id = ?",
+                (model, _now(), run_id),
+            )
+        self._require_updated(cursor.rowcount, run_id)
+
+    def set_gemini_error(self, run_id: str, error: str | None) -> None:
+        with self._connect() as connection:
+            cursor = connection.execute(
+                "UPDATE analysis_runs SET gemini_error = ?, updated_at = ? WHERE run_id = ?",
+                (error, _now(), run_id),
+            )
+        self._require_updated(cursor.rowcount, run_id)
 
     def update_counts(
         self,
@@ -663,6 +681,8 @@ class RunStateStore:
             analysis_mode=AnalysisMode(row["analysis_mode"]),
             force_generation=row["force_generation"],
             force_prepared=bool(row["force_prepared"]),
+            gemini_model=row["gemini_model"],
+            gemini_error=row["gemini_error"],
         )
 
     @staticmethod

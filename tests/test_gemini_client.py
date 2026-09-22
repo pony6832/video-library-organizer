@@ -46,6 +46,9 @@ class RecordingTransport:
         self.body: dict[str, object] = {}
         self.timeout = 0.0
 
+    def get(self, url, *, headers, timeout):
+        return {"models": [{"name": "models/gemini-3.8-flash", "supportedGenerationMethods": ["generateContent"]}]}
+
     def send(
         self,
         url: str,
@@ -95,10 +98,10 @@ def test_request_has_preview_bytes_but_no_key_or_local_path(
     assert base64.b64encode(b"preview-bytes").decode("ascii") in body
     assert transport.headers["x-goog-api-key"] == "unit-test-secret"
     assert transport.timeout == 90
-    assert "/models/gemini-3.7-flash:generateContent" in transport.url
+    assert "/models/gemini-3.8-flash:generateContent" in transport.url
 
 
-def test_model_can_be_overridden_only_by_environment(
+def test_stale_environment_model_cannot_override_discovery(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.setenv("GEMINI_API_KEY", "unit-test-secret")
@@ -107,7 +110,7 @@ def test_model_can_be_overridden_only_by_environment(
 
     GeminiClient(transport=transport).analyze(_request(tmp_path))
 
-    assert "/models/gemini-private-preview:generateContent" in transport.url
+    assert "/models/gemini-3.8-flash:generateContent" in transport.url
 
 
 def test_provider_error_redacts_key(
@@ -116,9 +119,9 @@ def test_provider_error_redacts_key(
     monkeypatch.setenv("GEMINI_API_KEY", "unit-test-secret")
 
     with pytest.raises(GeminiError) as captured:
-        GeminiClient(
-            transport=FailingTransport("unit-test-secret quota payload\nprivate")
-        ).analyze(_request(tmp_path))
+        client = GeminiClient(transport=FailingTransport("unit-test-secret quota payload\nprivate"))
+        client.model = "gemini-3.8-flash"
+        client.analyze(_request(tmp_path))
 
     assert "unit-test-secret" not in str(captured.value)
     assert "private" not in str(captured.value)

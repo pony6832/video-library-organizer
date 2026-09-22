@@ -74,6 +74,7 @@ def scan(
     database: CatalogDatabase,
     *,
     excluded_roots: Iterable[Path] = (),
+    video_only: bool = False,
 ) -> ScanResult:
     resolved_root = Path(root).resolve()
     if not resolved_root.is_dir():
@@ -95,6 +96,8 @@ def scan(
         media_type = SUPPORTED_MEDIA.get(path.suffix.casefold())
         if media_type is None:
             unsupported += 1
+            continue
+        if video_only and not media_type.startswith("video/"):
             continue
         supported += 1
         fingerprint = _fingerprint(path)

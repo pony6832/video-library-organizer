@@ -271,17 +271,17 @@ def test_view_model_prioritizes_excel_waiting_over_completed_status() -> None:
     assert model.status_text == "等待 Excel 關閉"
 
 
-def test_force_environment_requires_key_and_exact_model() -> None:
+def test_force_environment_requires_key_without_stale_model_pin() -> None:
     assert "API Key" in validate_force_environment({})
     assert validate_force_environment(
         {"GEMINI_API_KEY": "configured"}
     ) is None
-    assert "gemini-3.7-flash" in validate_force_environment(
+    assert validate_force_environment(
         {
             "GEMINI_API_KEY": "configured",
             "GEMINI_MODEL": "gemini-other",
         }
-    )
+    ) is None
     assert (
         validate_force_environment(
             {
