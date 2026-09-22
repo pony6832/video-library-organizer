@@ -38,6 +38,8 @@ Excel 2 列 × 12 欄且 C2 超連結存在；影片／照片 SHA256 前後一�
 
 ## 歷史產物與來源：20260922-final（保留，不覆寫）
 
+控制代理最終獨立驗收：reviewed 原生 EXE 主視窗 1080×730，所有控制項清楚可讀、無裁切，閒置關閉成功。重新執行完整測試為 **295 passed, 2 skipped in 30.10s**；核對 manifest 全部 **1008** 個檔案大小與 SHA256 一致，expanded frozen audit 再次 `passed: true, findings: []`。最終 scoped re-review 確認兩项 Important 與報告 Minor 均已修復，fix diff 無新增重大問題。以下內容為歷史產物紀錄，不代表目前下載版本。
+
 應用程式來源 commit：`fd5ebe63ca2ea6401c863cfbb883e184d24d6ddc`；
 封裝腳本、授權與測試由包含本文件的 Task4 commit 提供。
 工作目錄：`C:/Users/pony6832/Documents/ChatGPT/影片照片資料庫整理AGENT/.worktrees/fix-hidden-powershell`。
