@@ -68,3 +68,59 @@ def test_audit_reads_compressed_library_not_just_zip_bytes(tmp_path):
     with zipfile.ZipFile(root / '_internal/base_library.zip', 'w', compression=zipfile.ZIP_DEFLATED) as archive:
         archive.writestr('bad.pyc', b'AI' + b'za' + b'A' * 35)
     assert load_audit().audit(root)
+
+
+@pytest.mark.parametrize('data', [
+    b'sk' + b'-' + b'a1' * 24,
+    b'sk' + b'-proj-' + b'b2' * 40,
+    b'sk' + b'-ant-api03-' + b'c3' * 40,
+    b'{"api_key": "literal-secret"}',
+    b'{"accessToken": "literal-secret"}',
+    b'CUSTOM_API_TOKEN=literal-secret\n',
+    b'CLIENT_SECRET="literal-secret"\n',
+    b'api_key = "literal-secret"\n',
+    b'{"token": "literal-secret"}',
+    b'TOKEN="literal-secret"\r\n',
+    b'CUSTOM_API_TOKEN="literal-secret"\r\n',
+    b'ACCESS_TOKEN=literal-secret\r\n',
+])
+@pytest.mark.parametrize('compressed', [False, True])
+def test_audit_rejects_representative_tokens_and_literal_assignments(tmp_path, data, compressed):
+    import zipfile
+    root = bundle(tmp_path)
+    if compressed:
+        with zipfile.ZipFile(root / '_internal/base_library.zip', 'w', compression=zipfile.ZIP_DEFLATED) as archive:
+            archive.writestr('config.txt', data)
+    else:
+        (root / 'config.txt').write_bytes(data)
+    findings = load_audit().audit(root)
+    assert any('credential' in item for item in findings)
+    assert not any(data.decode() in item for item in findings)
+    assert not any('literal-secret' in item for item in findings)
+
+
+@pytest.mark.parametrize('data', [
+    b'API_KEY = os.getenv("API_KEY", "")\n',
+    b'token = os.environ.get("ACCESS_TOKEN")\n',
+    b'{"api_key": "", "access_token": null}',
+    b'API_KEY=\nACCESS_TOKEN=${ACCESS_TOKEN}\n',
+    b'Use the API_KEY environment variable; never save it.\n',
+    b"token='x'",  # SQL/parser token assignment is not a credential field.
+    b'mask-' + b'a1' * 500,
+])
+def test_audit_allows_variable_names_empty_values_and_environment_lookups(tmp_path, data):
+    root = bundle(tmp_path)
+    (root / 'safe.txt').write_bytes(data)
+    assert load_audit().audit(root) == []
+
+
+def test_audit_checks_windows_utf16_literal_credentials(tmp_path):
+    root = bundle(tmp_path)
+    (root / 'config.txt').write_bytes('ACCESS_TOKEN="literal-secret"'.encode('utf-16'))
+    assert load_audit().audit(root)
+
+
+def test_audit_rejects_environment_override_files(tmp_path):
+    root = bundle(tmp_path)
+    (root / '.env.production').write_text('EMPTY=', encoding='utf-8')
+    assert load_audit().audit(root)

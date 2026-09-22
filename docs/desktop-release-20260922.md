@@ -75,3 +75,26 @@ process執行原始assertions，60秒逾時、子程序錯誤完整回傳、無r
 最終驗證：`.venv/Scripts/python.exe -m pytest -q` → **252 passed, 2 skipped in 21.67s**。
 隨後桌面測試再跑一次 → **20 passed in 4.82s**。兩個既有skip屬付費Gemini live測試
 與須明確開啟的外部整合測試；本次未用skip略過nativeTk。
+
+## Review fix 1：憑證稽核擴充
+
+原稽核只有 Gemini 字串形狀，已擴充代表性 OpenAI `sk-`／`sk-proj-`、Anthropic
+`sk-ant-` 形狀，以及 JSON、明確credential欄位的Python字串賦值、dotenv的非空
+literal值；支援CRLF與Windows UTF-16的ASCII憑證語法，拒絕`.env.*`設定檔。
+正常getenv/environ查詢、空值、只提環境變數名稱不被當作Key。
+同樣掃描ZIP/PYZ解壓後內容；報告只輸出檔名，不顯示疑似秘密。
+
+初版擴充規則在供應商binary中誤抓`mask-`後綴和SQLite一般`token='x'`語法；
+現以完整token邊界、代表性長度上限及明確credential欄位語境修正，補反例回歸。
+不對整個供應商套件或檔案加入憑證豁免。一般小寫parser變數`token`不是必然憑證，
+裸`TOKEN`限uppercase dotenv整行或JSON字段；精確getenv語法保留通過。
+
+RED：新增測試先18fail/16pass；邊界反例2fail/34pass；CRLF與quoted dotenv
+回歸6fail/38pass。GREEN命令：
+`.venv/Scripts/python.exe -m pytest tests/test_desktop_packaging.py tests/test_a_plus_security.py -q`
+→ **46 passed in 0.58s**（44封裝＋2原有安全測試）。
+再跑上述`audit_bundle.py ... --frozen-archive` → `passed: true, findings: []`。
+最終installer/EXE未重建、hash與本文件一致；runtime與封裝內容完全未改。
+
+這是**有範圍的啟發式檢查，不是完整secret scanner**：未知token格式、被混淆或分割的
+值、非ASCII憑證、加密／額外巢狀封裝仍可能漏判；不能用通過結果保證任何秘密都不存在。
