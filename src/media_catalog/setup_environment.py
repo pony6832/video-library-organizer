@@ -16,6 +16,12 @@ def app_data_root() -> Path:
 
 
 def refresh_tool_path() -> None:
+    # npm lifecycle scripts run through cmd.exe, which drops PATH when it
+    # exceeds its 8191-character environment limit. Reserve room for npm's
+    # node_modules/.bin additions and keep required executables first.
+    priority = [str(Path(value).parent) for name in ('node', 'npm', 'ffmpeg', 'ffprobe', 'ollama', 'winget')
+                if (value := shutil.which(name))]
+    priority.append(str(Path(os.environ.get('SystemRoot', 'C:/Windows')) / 'System32'))
     paths = []
     if sys.platform == 'win32':
         import winreg
@@ -28,7 +34,17 @@ def refresh_tool_path() -> None:
                 pass
     paths += [str(Path(os.environ.get('LOCALAPPDATA', '')) / 'Programs' / 'Ollama'),
               str(Path(os.environ.get('ProgramFiles', 'C:/Program Files')) / 'nodejs')]
-    os.environ['PATH'] = os.pathsep.join([os.environ.get('PATH', ''), *paths])
+    entries, seen = [], set()
+    for group in [*priority, os.environ.get('PATH', ''), *paths]:
+        for raw in group.split(os.pathsep):
+            entry = os.path.expandvars(raw.strip().strip('"'))
+            key = os.path.normcase(os.path.normpath(entry))
+            if not entry or key in seen:
+                continue
+            seen.add(key)
+            if len(os.pathsep.join([*entries, entry])) <= 4096:
+                entries.append(entry)
+    os.environ['PATH'] = os.pathsep.join(entries)
 
 
 def run_external(args, *, timeout=120):
@@ -99,4 +115,15 @@ class EnvironmentSetup:
         except OSError as error:
             raise RuntimeError('無法執行安裝工具。請從 Microsoft Store 更新「應用程式安裝程式」（winget），再按「安裝缺少元件」。') from error
         if result.returncode:
-            raise RuntimeError(f'安裝未完成（代碼 {result.returncode}）。請檢查網路與 Windows 權限確認，關閉其他安裝程式後重試。')
+            detail = ((result.stdout or '') + (result.stderr or '')).lower()
+            if 'node' in detail and ('not recognized' in detail or '不是' in detail):
+                hint = '安裝子程序找不到 Node.js。請重新開啟本程式以更新 PATH，再按「安裝缺少元件」。'
+            elif 'enospc' in detail:
+                hint = '磁碟空間不足。請釋出使用者磁碟空間後重試。'
+            elif 'eperm' in detail or 'eacces' in detail:
+                hint = '檔案被鎖定或權限不足。請關閉其他安裝程式，確認防毒未封鎖後重試。'
+            else:
+                hint = '請檢查網路與 Windows 權限確認，關閉其他安裝程式後重試。'
+            if 'npm' in Path(args[0]).name.lower():
+                hint += ' npm 詳細紀錄位於 %LOCALAPPDATA%/npm-cache/_logs。'
+            raise RuntimeError(f'{Path(args[0]).name} 安裝未完成（代碼 {result.returncode}）。{hint}')

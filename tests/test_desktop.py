@@ -142,3 +142,37 @@ def test_setup_dialog_is_single_instance_and_checks_do_not_install(tmp_path):
         assert app.setup_busy is False
     finally:
         root.destroy()
+
+
+def test_repeated_tool_path_refresh_does_not_grow(monkeypatch):
+    from media_catalog.setup_environment import refresh_tool_path
+    import os
+    monkeypatch.setenv('PATH', os.environ['PATH'])
+    refresh_tool_path()
+    first = os.environ['PATH']
+    for _ in range(8):
+        refresh_tool_path()
+    assert os.environ['PATH'] == first
+    assert len(first) <= 4096
+
+
+def test_setup_child_cmd_still_finds_node_after_repeated_checks(monkeypatch):
+    from media_catalog.setup_environment import refresh_tool_path
+    import os, shutil, subprocess
+    import pytest
+    if not shutil.which('node') or os.name != 'nt':
+        pytest.skip('Windows node boundary')
+    monkeypatch.setenv('PATH', os.environ['PATH'])
+    for _ in range(8):
+        refresh_tool_path()
+    result = subprocess.run(['cmd.exe', '/d', '/c', 'node', '--version'], capture_output=True, text=True)
+    assert result.returncode == 0
+
+
+def test_npm_failure_identifies_child_node_resolution(tmp_path):
+    from media_catalog.setup_environment import EnvironmentSetup
+    import pytest
+    setup = EnvironmentSetup(tmp_path, runner=lambda *a, **k: Mock(
+        returncode=1, stdout='', stderr="'node' is not recognized as an internal or external command"))
+    with pytest.raises(RuntimeError, match='Node.js'):
+        setup._execute(['npm.cmd', 'install'], 10)
