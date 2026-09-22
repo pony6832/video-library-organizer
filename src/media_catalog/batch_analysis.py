@@ -190,15 +190,21 @@ def analyze_pending(
             or record.id in force_eligible_ids
         )
         fatal = sum(record.status is Status.FAILED for record in scoped)
-        if mode is not AnalysisMode.FORCE_GEMINI:
-            return fatal
         warnings = sum(
             record.status is Status.ANALYZED
             and bool(record.error)
-            and record.error.startswith("Gemini 強化失敗")
+            and record.error.startswith(("Gemini 強化失敗", "Gemini model discovery failed:"))
             for record in scoped
         )
         return fatal + warnings
+
+    def persist_cloud_warning(records: Iterable[MediaRecord]) -> None:
+        if run_state is None or active_run_id is None:
+            return
+        warnings = [r.error for r in records if r.error and r.error.startswith(
+            ("Gemini 強化失敗", "Gemini model discovery failed:"))]
+        if warnings:
+            run_state.set_gemini_error(active_run_id, sanitize_error(warnings[-1]))
 
     def completed_count(records: Iterable[MediaRecord]) -> int:
         return sum(
@@ -231,6 +237,7 @@ def analyze_pending(
         records = scoped_records()
         durable_completed = completed_count(records)
         current_failed_count = failed_count(records)
+        persist_cloud_warning(records)
         run_state.update_counts(
             active_run_id,
             completed_media=durable_completed,
@@ -323,6 +330,7 @@ def analyze_pending(
         sync_excel()
 
     final_records = scoped_records()
+    persist_cloud_warning(final_records)
     failed = failed_count(final_records)
     remaining = sum(
         not has_complete_analysis(record)

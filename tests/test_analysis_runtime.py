@@ -37,9 +37,11 @@ def _skill_tree(tmp_path: Path, *, include_mcp: bool = True) -> Path:
         )
         package_json.parent.mkdir(parents=True)
         package_json.write_text(
-            json.dumps({"name": "mcp-video-analyzer", "version": "0.8.0"}),
+            json.dumps({"name": "mcp-video-analyzer", "version": "0.8.0", "bin": {"mcp-video-analyzer": "./dist/index.js"}}),
             encoding="utf-8",
         )
+        (package_json.parent / 'dist').mkdir()
+        (package_json.parent / 'dist/index.js').write_text('// synthetic CLI')
     return skill_root
 
 

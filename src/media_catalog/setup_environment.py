@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 from .process_utils import HIDDEN_PROCESS_CREATION_FLAGS
+from .mcp_installation import mcp_ready, prepare_mcp_install
 
 MODEL = 'qwen3-vl:8b-instruct'
 
@@ -70,7 +71,7 @@ class EnvironmentSetup:
     def check(self):
         refresh_tool_path()
         checks = {name: bool(self.which(name)) for name in ('ffmpeg', 'ffprobe', 'node', 'npm', 'ollama')}
-        checks['mcp-video-analyzer'] = (self.root / '.tools/mcp-video-analyzer/node_modules/mcp-video-analyzer/package.json').is_file()
+        checks['mcp-video-analyzer'] = mcp_ready(self.root / '.tools/mcp-video-analyzer')
         error = ''
         checks[MODEL] = False
         if checks['ollama']:
@@ -104,8 +105,7 @@ class EnvironmentSetup:
         npm, ollama = self.which('npm'), self.which('ollama')
         if npm and not report['checks']['mcp-video-analyzer']:
             progress('正在準備影片擷取工具…')
-            target = self.root / '.tools/mcp-video-analyzer'
-            target.mkdir(parents=True, exist_ok=True)
+            target = prepare_mcp_install(self.root)
             self._execute([npm, 'install', '--prefix', str(target), '--no-audit', '--no-fund', 'mcp-video-analyzer@0.8.0'], 900)
         if ollama and not report['checks'][MODEL]:
             progress('正在下載本機視覺模型（約 6 GB），請保持網路連線…')

@@ -17,6 +17,7 @@ from .inference import (
     WatchVideoExtractor,
 )
 from .process_utils import HIDDEN_PROCESS_CREATION_FLAGS
+from .mcp_installation import MCP_VIDEO_ANALYZER_VERSION, mcp_ready
 from .run_state import RunStateStore
 from .scene_segments import SceneSegmenter
 from .segment_pipeline import SegmentPipeline
@@ -24,7 +25,6 @@ from .stage_runner import StageRunner
 from .workspace import MediaWorkspace
 
 
-MCP_VIDEO_ANALYZER_VERSION = "0.8.0"
 
 
 class RuntimePreflightError(RuntimeError):
@@ -129,7 +129,7 @@ def build_local_analyzer(
         / "package.json"
     )
     mcp = None
-    if mcp_executable.is_file() and mcp_package.is_file():
+    if mcp_ready(mcp_root):
         try:
             mcp = McpVideoExtractor(
                 executable_path=mcp_executable,

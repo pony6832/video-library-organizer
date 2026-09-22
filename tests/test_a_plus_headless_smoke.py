@@ -48,6 +48,10 @@ class FakeLocalAnalyzer:
 
 class FakeGemini:
     is_configured = True
+    discovery_error = None
+
+    def discover_model(self):
+        return 'gemini-synthetic'
 
     def analyze(self, _request) -> Analysis:
         return STRONG_VIDEO

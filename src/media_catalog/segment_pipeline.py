@@ -133,6 +133,12 @@ class SegmentPipeline:
                 warning = (
                     f"Gemini 強化失敗:{failed_force_segments} 段"
                 )
+        else:
+            cloud_failures = sum(bool(s.error and s.error.startswith('cloud_failed:')) for s in persisted)
+            if cloud_failures:
+                # Do not expose provider exception payloads or count ordinary
+                # quality review / missing-key / application budget decisions.
+                warning = f"Gemini 強化失敗:{cloud_failures} 段（已保留本機分析）"
 
         analyses = tuple(self._best_analysis(segment) for segment in persisted)
         summary = self.stage_runner.run(
