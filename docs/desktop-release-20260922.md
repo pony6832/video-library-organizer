@@ -1,6 +1,42 @@
 # Windows 影片桌面版 0.1.0 — 2026-09-22 封裝驗證
 
-## 產物與來源
+## 最新審查修正版：20260922-reviewed
+
+目前預設下載／安裝產物為 reviewed，不是下方保留的歷史 final。
+應用程式及封裝來源：`0a42c2528f4618f40e1113debbc8a80c5fa81520`；建置時 tracked tree 乾淨。
+本次共用 MCP 就緒檢查核對 shim、package name、0.8.0 版本、JSON 及 dist/index.js；
+不完整工具安裝會保留唯一備份後 fresh install，修復拒絕 reparse point。
+AUTO 模型探索成功但生成失敗，現在保留本機結果，同時持久化 Gemini 警告與失敗／降級數。
+無 Key、單純低信心或本機請求額度限制，不算供應商失敗。
+
+| 產物（相對工作目錄） | bytes | SHA256 |
+| --- | ---: | --- |
+| `dist/20260922-reviewed/MediaCatalogVideoDesktop-Setup.exe` | 15471502 | `6F8759DF3B46C881797350CDE3F94D5A23553335E7C8D4F94070EF4F04BF5782` |
+| `dist/20260922-reviewed/MediaCatalogVideoDesktop/MediaCatalogVideoDesktop.exe` | 3446450 | `C845AEAB64BD123A7C10841CBA3E6B40DF0D29E39F155FF3006A5EAF3AA2403A` |
+
+onedir：1007 檔、46018771 bytes；完整檔案清單 `dist/20260922-reviewed/SHA256.json`。
+兩個 EXE Authenticode 均為 `NotSigned`。
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-desktop.ps1 -BuildId 20260922-reviewed
+.venv/Scripts/python.exe packaging/audit_bundle.py dist/20260922-reviewed/MediaCatalogVideoDesktop --frozen-archive
+.venv/Scripts/python.exe packaging/smoke_desktop.py dist/20260922-reviewed --qa-id reviewed --analyze --uninstall
+.venv/Scripts/python.exe -m pytest -q -rs
+```
+
+建置內已執行 expanded frozen archive audit：`passed: true, findings: []`。
+另獨立重跑相同 audit 亦通過。新版 portable 診斷為 `ready=true`，所有元件 true。
+reviewed 真實隔離安裝、本機合成影片分析、解除安裝全部通過，收據：
+`build/desktop-acceptance/reviewed/acceptance.json`。只有 1 支影片入冊、0 照片，
+Excel 2 列 × 12 欄且 C2 超連結存在；影片／照片 SHA256 前後一致。
+解除安裝僅移除隔離 QA 程式，原始檔、SQLite、Excel、既有使用者 MCP 保留。
+子程序雲端 Key 已移除；無付費 API 呼叫。reviewed GUI 視覺驗收由控制代理獨立執行，
+本段不以歷史 final GUI 截圖冒充新版檢查。
+最終完整 pytest：**295 passed, 2 skipped in 20.83s**。
+兩項跳過明確為 Gemini live explicit opt-in，以及 Windows 建立目錄 symlink 缺權限（WinError 1314）；
+不是兩項外部整合 opt-in，也沒有跳過 native Tk。MCP 安全修復另用不需該權限的實際 junction 測試，2 項通過。
+
+## 歷史產物與來源：20260922-final（保留，不覆寫）
 
 應用程式來源 commit：`fd5ebe63ca2ea6401c863cfbb883e184d24d6ddc`；
 封裝腳本、授權與測試由包含本文件的 Task4 commit 提供。
@@ -72,9 +108,8 @@ DesktopApplication create/destroy都成功，但pytest仍偶發初始化失敗�
 process執行原始assertions，60秒逾時、子程序錯誤完整回傳、無retry/skip，符合產品
 每process一個Tk interpreter的使用模式；應用程式runtime完全未變。
 
-最終驗證：`.venv/Scripts/python.exe -m pytest -q` → **252 passed, 2 skipped in 21.67s**。
-隨後桌面測試再跑一次 → **20 passed in 4.82s**。兩個既有skip屬付費Gemini live測試
-與須明確開啟的外部整合測試；本次未用skip略過nativeTk。
+歷史 Task4 驗證：`.venv/Scripts/python.exe -m pytest -q` → **252 passed, 2 skipped in 21.67s**；不是最新套件總數。
+隨後桌面測試再跑一次 → **20 passed in 4.82s**。最新 skip 原因已更正並記錄於上方 reviewed 節；未用 skip 略過 native Tk。
 
 ## Review fix 1：憑證稽核擴充
 
