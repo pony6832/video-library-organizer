@@ -126,3 +126,19 @@ def test_stop_requested_but_worker_alive_is_not_claimed_stopped(tmp_path):
     app = DesktopApplication.__new__(DesktopApplication)
     app.cloud_var = Mock()
     assert '停止中' in app._view_model(SupervisorSnapshot('running', True, run)).status_text
+
+
+def test_setup_dialog_is_single_instance_and_checks_do_not_install(tmp_path):
+    import tkinter as tk
+    from media_catalog.desktop import DesktopApplication
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        app = DesktopApplication(root, skill_root=tmp_path, supervisor=Mock(is_busy=False))
+        app._setup_dialog()
+        app._setup_dialog()
+        windows = [child for child in root.winfo_children() if isinstance(child, tk.Toplevel)]
+        assert len(windows) == 1
+        assert app.setup_busy is False
+    finally:
+        root.destroy()

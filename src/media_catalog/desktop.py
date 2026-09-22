@@ -205,7 +205,13 @@ class DesktopApplication(StatusApplication):
             button.configure(state='normal' if has_outputs else 'disabled')
 
     def _setup_dialog(self):
+        existing = getattr(self, 'setup_window', None)
+        if existing is not None and existing.winfo_exists():
+            existing.lift()
+            existing.focus_set()
+            return
         window = self.tk.Toplevel(self.root)
+        self.setup_window = window
         window.title('首次設定與環境檢查')
         window.geometry('740x420')
         window.transient(self.root)
