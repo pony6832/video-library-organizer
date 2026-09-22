@@ -1,5 +1,17 @@
 # Media Catalog Agent
 
+## 新版 Windows 影片專用桌面版
+
+執行 `dist/<build-id>/MediaCatalogVideoDesktop-Setup.exe` 安裝，不需要 Codex 或 Python。
+此獨立產品僅處理影片，與下方舊版 A+ Skill 並存、不覆蓋。
+安裝後先開啟「環境檢查／首次設定」，明確按安裝才下載缺少的工具與約 6 GB 本機模型。
+此輕量安裝包不含模型、使用者媒體或 API Key；**未數位簽章**，可能觸發 SmartScreen。
+完整操作及限制見 [繁體中文桌面版說明](packaging/README-zh-TW.md)。
+
+建置工具備妥後，以 `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-desktop.ps1` 重建。
+每次使用全新時間戳版本目錄；已有 BuildId 將拒絕覆寫，不自動刪除任何舊版本。
+產物包含 onedir 程式資料夾、每使用者安裝器及 `SHA256.json`；搬移可攜版時需保留整個程式資料夾。
+
 本專案會掃描指定的本機照片／影片資料夾，將 SQLite、Excel 清冊與分析暫存集中寫入來源根目錄下的 `媒體整理成果`。來源媒體保持原位，不移動、不改名、不修改 metadata。
 
 ## 換電腦安裝

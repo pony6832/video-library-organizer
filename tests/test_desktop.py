@@ -1,6 +1,25 @@
 from pathlib import Path
 from unittest.mock import Mock
 import importlib.util
+import functools
+import os
+import subprocess
+import sys
+
+
+def isolated_native_tk(test):
+    """Exercise one native Tcl interpreter per process, as the real app does."""
+    @functools.wraps(test)
+    def run(*args, **kwargs):
+        if os.environ.get('MEDIA_CATALOG_TK_TEST') == test.__name__:
+            return test(*args, **kwargs)
+        environment = dict(os.environ, MEDIA_CATALOG_TK_TEST=test.__name__)
+        result = subprocess.run(
+            [sys.executable, '-m', 'pytest', f'{Path(__file__).resolve()}::{test.__name__}', '-q'],
+            env=environment, capture_output=True, text=True, encoding='utf-8', errors='replace',
+            timeout=60, creationflags=getattr(subprocess, 'CREATE_NO_WINDOW', 0))
+        assert result.returncode == 0, result.stdout + result.stderr
+    return run
 
 
 def test_desktop_entry_exists():
@@ -69,6 +88,7 @@ def test_setup_timeout_is_actionable(tmp_path):
         EnvironmentSetup(tmp_path, which=lambda name: None, runner=runner).install(lambda msg: None)
 
 
+@isolated_native_tk
 def test_desktop_idle_layout_and_single_primary_action(tmp_path):
     import tkinter as tk
     from media_catalog.desktop import DesktopApplication
@@ -128,6 +148,7 @@ def test_stop_requested_but_worker_alive_is_not_claimed_stopped(tmp_path):
     assert '停止中' in app._view_model(SupervisorSnapshot('running', True, run)).status_text
 
 
+@isolated_native_tk
 def test_setup_dialog_is_single_instance_and_checks_do_not_install(tmp_path):
     import tkinter as tk
     from media_catalog.desktop import DesktopApplication
@@ -178,6 +199,7 @@ def test_npm_failure_identifies_child_node_resolution(tmp_path):
         setup._execute(['npm.cmd', 'install'], 10)
 
 
+@isolated_native_tk
 def test_existing_setup_dialog_is_disabled_when_analysis_starts(tmp_path, monkeypatch):
     import tkinter as tk
     import media_catalog.desktop as desktop
@@ -198,6 +220,7 @@ def test_existing_setup_dialog_is_disabled_when_analysis_starts(tmp_path, monkey
         root.destroy()
 
 
+@isolated_native_tk
 def test_setup_handler_cannot_start_during_analysis(tmp_path, monkeypatch):
     import tkinter as tk
     import media_catalog.desktop as desktop

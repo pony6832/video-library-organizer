@@ -1,0 +1,26 @@
+Media Catalog Video Desktop 0.1.0 - third-party notices
+
+The distribution includes Python (PSF License), Tcl/Tk (Tcl/Tk BSD-style
+license), Pillow (MIT-CMU and its bundled codec notices), openpyxl (MIT), and
+et_xmlfile (MIT). Full available license texts are copied into
+_internal/licenses at build time; bundled runtime data may contain additional
+component notices. Pillow wheels include codec libraries; their supplied
+licenses directory is included intact.
+
+The executable is built with PyInstaller (GPL 2.0 with bootloader exception).
+The exception permits distribution of applications built with PyInstaller
+under the application's own terms; see the full COPYING.txt in licenses.
+The installer uses Inno Setup. Inno Setup license text is included in licenses.
+
+FFmpeg, Node.js, Ollama, mcp-video-analyzer and Qwen model weights are NOT
+bundled. Their separate licenses and terms apply when explicitly downloaded.
+Gemini is an optional external service subject to its own terms and charges.
+
+No digital signature is provided for this application or setup executable.
+
+The Inno Setup compiler used for local validation was unregistered and
+displayed "Non-commercial use only". No commercial license was purchased.
+Consult its current official terms before commercial distribution:
+https://jrsoftware.org/isinfo.php
+The bundled license.txt text is preserved without modification.
+Tcl license source: https://github.com/tcltk/tcl/blob/core-8-6-branch/license.terms
