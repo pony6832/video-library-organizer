@@ -229,7 +229,7 @@ def test_analyze_pending_preserves_source_snapshot(tmp_path: Path) -> None:
     assert capture_source(source) == before
 
 
-def test_excel_failure_stops_before_analyzing_the_next_item(
+def test_excel_failure_after_batch_keeps_sqlite_results(
     tmp_path: Path,
 ) -> None:
     workspace = _workspace_with_media(tmp_path, ("first.jpg", "second.jpg"))
@@ -245,8 +245,8 @@ def test_excel_failure_stops_before_analyzing_the_next_item(
         record.status
         for record in CatalogDatabase(workspace.database_path).list_records()
     ]
-    assert statuses == [Status.PROCESSING, Status.PENDING]
-    assert analyzer.sources == []
+    assert statuses == [Status.ANALYZED, Status.ANALYZED]
+    assert len(analyzer.sources) == 2
 
 
 def test_a_plus_runtime_continues_sqlite_analysis_when_excel_is_locked(

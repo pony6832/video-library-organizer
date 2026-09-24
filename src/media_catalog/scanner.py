@@ -5,7 +5,7 @@ import hashlib
 import os
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Iterable, Iterator
+from typing import Callable, Iterable, Iterator
 
 from .database import CatalogDatabase
 from .workspace import is_reparse_point
@@ -75,6 +75,7 @@ def scan(
     *,
     excluded_roots: Iterable[Path] = (),
     video_only: bool = False,
+    on_record: Callable[[int], None] | None = None,
 ) -> ScanResult:
     resolved_root = Path(root).resolve()
     if not resolved_root.is_dir():
@@ -108,6 +109,8 @@ def scan(
         else:
             existing += 1
         database.upsert_discovered(path, fingerprint, media_type)
+        if on_record is not None:
+            on_record(supported)
 
     return ScanResult(
         discovered=discovered,

@@ -21,11 +21,16 @@ def bootstrap_workspace(root: Path, *, video_only: bool = False) -> BootstrapRes
     workspace.ensure_directories()
 
     database = CatalogDatabase(workspace.database_path)
+    def checkpoint(count: int) -> None:
+        if count % 100 == 0:
+            write_excel(database.list_records(), workspace.excel_path)
+
     scan_result = scan(
         workspace.root,
         database,
         excluded_roots=(workspace.result_root,),
         video_only=video_only,
+        on_record=checkpoint,
     )
     records = database.list_records()
     write_excel(records, workspace.excel_path)

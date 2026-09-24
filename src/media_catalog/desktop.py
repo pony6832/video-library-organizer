@@ -14,11 +14,18 @@ from .analysis_mode import AnalysisMode
 from .setup_environment import EnvironmentSetup, app_data_root
 from .status_ui import StatusApplication, StatusViewModel, format_force_confirmation
 from .workspace import MediaWorkspace
+from .credential_store import CredentialError, read_key, write_key
 
 
 def set_session_key(value: str) -> None:
     if value.strip():
         os.environ['GEMINI_API_KEY'] = value.strip()
+
+
+def analysis_progress_text(percent: int, progress: str, remaining: str) -> str:
+    if progress.startswith(('清冊已收錄', '清冊已寫入')):
+        return progress
+    return f'{percent}%　已完成 {progress}　未完成 {remaining}'
 
 
 def select_video_root(selected, supervisor, app_root):
@@ -42,6 +49,14 @@ class DesktopApplication(StatusApplication):
         self.events = queue.Queue()
         self.environment = EnvironmentSetup(skill_root)
         super().__init__(root, skill_root=skill_root or app_data_root(), **kwargs)
+        try:
+            saved_key = read_key()
+        except CredentialError as error:
+            saved_key = None
+            self.messagebox.showwarning('Gemini Key 無法讀取', str(error))
+        if saved_key:
+            set_session_key(saved_key)
+        self.key_status_var.set('Key 已儲存' if saved_key else '尚未設定 Key')
         root.title('影片資料庫整理')
         root.geometry('1080x730')
         root.minsize(920, 680)
@@ -82,10 +97,10 @@ class DesktopApplication(StatusApplication):
         self.mode_box = ttk.Combobox(modes, textvariable=self.mode_var, state='readonly', width=28,
             values=['自動分析（本機優先）', 'Gemini 強化（雲端付費）'])
         self.mode_box.pack(side='left')
-        tk.Label(modes, text='Gemini Key（僅本次工作階段）', bg='#0F172A', fg='#CBD5E1').pack(side='left', padx=(16, 8))
-        self.key_var = tk.StringVar()
-        self.key_entry = ttk.Entry(modes, textvariable=self.key_var, show='•', width=22)
-        self.key_entry.pack(side='left', fill='x', expand=True)
+        self.key_status_var = tk.StringVar(value='尚未設定 Key')
+        tk.Label(modes, textvariable=self.key_status_var, bg='#0F172A', fg='#CBD5E1').pack(side='left', padx=(16, 8))
+        self.key_button = self._button(modes, '設定／更換 Key', self._key_dialog)
+        self.key_button.pack(side='left')
         tk.Label(panel, text='自動模式以本機模型為主；若提供 Key，低信心內容可傳送縮圖至 Gemini。',
                  bg='#0F172A', fg='#CBD5E1', anchor='w').pack(fill='x')
         self._label(panel, '分析進度', self.progress_var)
@@ -134,6 +149,32 @@ class DesktopApplication(StatusApplication):
         if not self.supervisor.is_busy and not self.setup_busy:
             self._select(self.folder_picker())
 
+    def _key_dialog(self):
+        window = self.tk.Toplevel(self.root)
+        window.title('設定 Gemini Key')
+        window.geometry('430x160')
+        window.transient(self.root)
+        window.grab_set()
+        self.tk.Label(window, text='輸入新的 Gemini Key；儲存後下次啟動會自動使用。',
+                      padx=16, pady=12).pack(anchor='w')
+        value = self.tk.StringVar()
+        entry = self.ttk.Entry(window, textvariable=value, show='•', width=50)
+        entry.pack(fill='x', padx=16)
+        entry.focus_set()
+
+        def save():
+            try:
+                write_key(value.get())
+            except (CredentialError, ValueError) as error:
+                self.messagebox.showerror('無法儲存 Key', str(error), parent=window)
+                return
+            set_session_key(value.get())
+            value.set('')
+            self.key_status_var.set('Key 已儲存')
+            window.destroy()
+
+        self.ttk.Button(window, text='儲存 Key', command=save).pack(pady=12)
+
     def _select(self, selected):
         try:
             workspace = select_video_root(selected, self.supervisor, self.skill_root)
@@ -147,8 +188,6 @@ class DesktopApplication(StatusApplication):
     def _start(self):
         if self.workspace is None or self.supervisor.is_busy or self.setup_busy:
             return
-        set_session_key(self.key_var.get())
-        self.key_var.set('')
         force = self.mode_var.get().startswith('Gemini')
         try:
             if not self.workspace.database_path.is_file() or not self.workspace.excel_path.is_file():
@@ -177,8 +216,15 @@ class DesktopApplication(StatusApplication):
 
     def _render(self, model):
         super()._render(model)
-        if model.progress_text.startswith('清冊已收錄'):
-            self.progress_var.set(model.progress_text)
+        self.progress_var.set(analysis_progress_text(model.progress_percent, model.progress_text, model.remaining_text))
+        if model.status_text == '正在建立影片清冊…' or self.supervisor.is_busy and self.supervisor.catalog_process is not None and self.supervisor.catalog_process.poll() is None:
+            if str(self.progress['mode']) != 'indeterminate':
+                self.progress.configure(mode='indeterminate')
+                self.progress.start(12)
+        elif str(self.progress['mode']) == 'indeterminate':
+            self.progress.stop()
+            self.progress.configure(mode='determinate')
+            self.progress['value'] = model.progress_percent
         self.counts_var.set(f'影片：{model.video_count}　容量：{model.total_size_text}　（不新增或分析照片）')
         self.status_var.set(model.status_text.replace('worker', '分析程序'))
 
@@ -186,6 +232,12 @@ class DesktopApplication(StatusApplication):
         model = super()._view_model(snapshot)
         if snapshot.run and snapshot.run.stop_requested and snapshot.worker_alive:
             model = replace(model, status_text='安全停止中，正在保存目前進度…')
+        if snapshot.run is None and snapshot.status == 'cataloging' and self.workspace and self.workspace.database_path.is_file():
+            from .database import CatalogDatabase
+            records = [r for r in CatalogDatabase(self.workspace.database_path).list_records() if r.media_type.startswith('video/')]
+            model = StatusViewModel.without_run(status_text=model.status_text, root_text=model.root_text,
+                video_count=len(records), total_bytes=sum(r.path.stat().st_size for r in records if r.path.is_file()))
+            model = replace(model, progress_text=f'清冊已寫入 {len(records)} 部影片；正在掃描其餘檔案')
         if snapshot.run is None and snapshot.status == 'catalog_ready' and self.workspace:
             from .database import CatalogDatabase
             records = [r for r in CatalogDatabase(self.workspace.database_path).list_records() if r.media_type.startswith('video/')]
@@ -202,7 +254,7 @@ class DesktopApplication(StatusApplication):
         self.start_button.configure(state='normal' if self.workspace and not busy else 'disabled')
         self.stop_button.configure(state='normal' if self.supervisor.is_busy else 'disabled')
         self.mode_box.configure(state='disabled' if busy else 'readonly')
-        self.key_entry.configure(state='disabled' if busy else 'normal')
+        self.key_button.configure(state='disabled' if busy else 'normal')
         self.setup_button.configure(state='disabled' if busy else 'normal')
         setup_window = getattr(self, 'setup_window', None)
         if setup_window is not None and setup_window.winfo_exists():

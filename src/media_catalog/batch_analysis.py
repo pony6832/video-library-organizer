@@ -267,8 +267,9 @@ def analyze_pending(
                     Status.FAILED,
                     error=sanitize_error(str(error)),
                 )
-                sync_excel()
                 completed += 1
+                if completed % 100 == 0:
+                    sync_excel()
                 update_run(record.id)
                 if progress is not None:
                     current = database.get_record(record.id)
@@ -277,7 +278,6 @@ def analyze_pending(
                 continue
 
             database.set_status(record.id, Status.PROCESSING)
-            sync_excel()
             update_run(record.id)
             try:
                 warning = None
@@ -301,7 +301,6 @@ def analyze_pending(
                 verify_record_source(record, snapshot)
             except SafeStopRequested:
                 database.set_status(record.id, Status.PENDING)
-                sync_excel()
                 update_run(record.id)
                 break
             except (AnalysisError, OSError, SourceIntegrityError) as error:
@@ -319,8 +318,9 @@ def analyze_pending(
                     warning=warning,
                 )
                 analyzed += 1
-            sync_excel()
             completed += 1
+            if completed % 100 == 0:
+                sync_excel()
             update_run(record.id)
             if progress is not None:
                 current = database.get_record(record.id)
