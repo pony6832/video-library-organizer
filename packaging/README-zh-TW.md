@@ -7,7 +7,7 @@
 
 1. 執行 MediaCatalogVideoDesktop-Setup.exe，安裝到目前使用者帳號。
 2. 從桌面或開始功能表「Media Catalog Video Desktop」啟動。
-3. 先按「環境檢查／首次設定」檢查；檢查本身不會下載或分析。
+3. 先按右上角「環境設定」，再按「檢查環境」；檢查本身不會下載或分析。
 4. 缺少元件時，經你按下安裝才會下載 FFmpeg、Node.js、Ollama、
    MCP Video Analyzer 及 qwen3.5:9b 模型（Q4_K_M，約 6.6 GB）。
    需要網路與足夠空間，外部元件安裝可能需要 Windows 權限確認。
@@ -21,7 +21,7 @@ SQLite、Excel 與分析暫存位於所選資料夾內的「媒體整理成果�
 自動分析採本機優先；若不提供 Gemini Key，也沒有環境中的雲端 Key，
 不會使用 Gemini。若提供 Key，低信心縮圖可能送至 Gemini 並產生費用。
 Gemini 強化會先要求確認；實際模型依 API 當下可用穩定 Flash 清單選擇。
-按「設定／更換 Key」輸入一次後，Key 儲存在目前 Windows 使用者的 Credential Manager，
+在「分析方式」卡片下方按「設定 Key」輸入一次後，Key 儲存在目前 Windows 使用者的 Credential Manager，
 下次啟動自動讀取；需要更換時再按相同按鈕。介面不顯示完整 Key，安裝包、捷徑、
 媒體成果及命令列均不含 Key。若 Gemini 回報 Key 無效，請更換後重新執行。
 按「檢查 Key」可查詢可用模型清單，不傳送影片或執行生成；這只證明當下可列出模型，

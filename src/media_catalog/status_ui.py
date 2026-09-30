@@ -1,14 +1,16 @@
 from __future__ import annotations
 
 import argparse
-import sqlite3
 import os
+import re
+import sqlite3
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Callable, Sequence
 
+from . import ui_theme as theme
 from .analysis_mode import AnalysisMode
 from .database import CatalogDatabase
 from .excel_catalog import ReviewedPathsError, read_reviewed_paths_strict
@@ -204,6 +206,19 @@ class ControlState:
         )
 
 
+MODE_LOCAL = "自動分析（本機優先）"
+MODE_GEMINI = "Gemini 強化（雲端付費）"
+
+_PLAIN_PROGRESS = re.compile(r"^\d+ / \d+$")
+
+
+def progress_detail(progress_text: str, remaining_text: str) -> str:
+    """One readable line under the big percentage."""
+    if _PLAIN_PROGRESS.match(progress_text):
+        return f"已完成 {progress_text}　·　未完成 {remaining_text}"
+    return progress_text
+
+
 def begin_selected_root(
     selected: str,
     supervisor: WorkerSupervisor,
@@ -249,10 +264,8 @@ class StatusApplication:
         )
         self.closing = False
 
-        root.title("Media Catalog A+ 狀態監控")
-        root.geometry("1040x540")
-        root.minsize(920, 500)
-        root.configure(bg="#0F172A")
+        root.title(self.WINDOW_TITLE)
+        root.configure(bg=theme.BG)
         root.protocol("WM_DELETE_WINDOW", self._on_close)
 
         initial = (
@@ -267,157 +280,242 @@ class StatusApplication:
         self.path_var = tk.StringVar(value=initial.root_text)
         self.counts_var = tk.StringVar(value="影片：0　影像：0　總容量：0 B")
         self.progress_var = tk.StringVar(value="進度：0 / 0　未完成：0")
-        self.current_var = tk.StringVar(value="目前：尚未開始")
-        self.gemini_var = tk.StringVar(value="Gemini 強化：0 / 12")
+        self.current_var = tk.StringVar(value="尚未開始")
+        self.gemini_var = tk.StringVar(value="0 / 12")
         self.failure_var = tk.StringVar(value="失敗／降級：0")
+        self.video_tile_var = tk.StringVar(value="0")
+        self.image_tile_var = tk.StringVar(value="0")
+        self.size_tile_var = tk.StringVar(value="0 B")
+        self.percent_var = tk.StringVar(value="0%")
+        self.detail_var = tk.StringVar(value="選擇資料夾後開始")
+        self.mode_var = tk.StringVar(value=MODE_LOCAL)
+        self.hint_var = tk.StringVar(value="")
 
         self._build_layout()
         self._render(initial)
         self._apply_control_state()
+        self._fit_window()
         self.root.after(1000, self._refresh)
         if self.media_root is not None:
             self.root.after(0, self._start)
 
+    # Texts and layout hooks; DesktopApplication overrides these.
+    WINDOW_TITLE = "Media Catalog A+"
+    APP_TITLE = "Media Catalog A+"
+    APP_SUBTITLE = "為本機照片與影片建立清冊與內容摘要｜原始檔案不會被移動或修改"
+    STEPS = ("選擇資料夾", "建立清冊", "分析媒體", "檢閱成果")
+    SOURCE_TITLE = "媒體資料夾"
+    DEFAULT_WIDTH = 1060
+
+    def _fit_window(self) -> None:
+        """Size the window from its content instead of fixed pixels, so the
+        layout also fits on scaled (125%/150%) displays."""
+        self.root.update_idletasks()
+        # Stay on screen on small, heavily scaled laptops; the action bar is
+        # packed first, so any shortfall trims card whitespace, not buttons.
+        screen_width = self.root.winfo_screenwidth()
+        screen_height = self.root.winfo_screenheight() - 80
+        required_width = min(self.root.winfo_reqwidth(), screen_width)
+        height = min(self.root.winfo_reqheight(), screen_height)
+        width = min(max(required_width, self.DEFAULT_WIDTH), screen_width)
+        self.root.minsize(required_width, height)
+        self.root.geometry(f"{width}x{height}")
+
     def _build_layout(self) -> None:
         tk = self.tk
-        ttk = self.ttk
-        panel = tk.Frame(self.root, bg="#0F172A", padx=28, pady=16)
-        panel.pack(fill="both", expand=True)
+        theme.configure_ttk(self.ttk, self.root)
+        self.root.option_add("*Font", theme.font(10))
 
-        title = tk.Label(
-            panel,
-            text="Media Catalog A+",
-            bg="#0F172A",
-            fg="#F8FAFC",
-            font=("Segoe UI Semibold", 22),
-            anchor="w",
-        )
-        title.pack(fill="x")
+        header = tk.Frame(self.root, bg=theme.SURFACE, padx=28, pady=14)
+        header.pack(fill="x")
+        tk.Frame(self.root, bg=theme.BORDER, height=1).pack(fill="x")
+        titles = tk.Frame(header, bg=theme.SURFACE)
+        titles.pack(side="left")
+        tk.Label(titles, text=self.APP_TITLE, bg=theme.SURFACE, fg=theme.TEXT,
+                 font=theme.font(17, "bold"), anchor="w").pack(anchor="w")
+        tk.Label(titles, text=self.APP_SUBTITLE, bg=theme.SURFACE, fg=theme.TEXT_MUTED,
+                 font=theme.font(9), anchor="w").pack(anchor="w", pady=(2, 0))
+        header_right = tk.Frame(header, bg=theme.SURFACE)
+        header_right.pack(side="right")
+        self._build_header_actions(header_right)
+        self.status_pill = theme.StatusPill(tk, header_right, self.status_var)
+        self.status_pill.frame.pack(side="right", padx=(0, 12))
+        self.light = self.status_pill.light
+        self.light_dot = self.status_pill.light_dot
 
-        status_row = tk.Frame(panel, bg="#0F172A", pady=8)
-        status_row.pack(fill="x")
-        self.light = tk.Canvas(
-            status_row,
-            width=22,
-            height=22,
-            bg="#0F172A",
-            highlightthickness=0,
-        )
-        self.light.pack(side="left")
-        self.light_dot = self.light.create_oval(4, 4, 18, 18, fill="#EF4444", outline="")
-        tk.Label(
-            status_row,
-            textvariable=self.status_var,
-            bg="#0F172A",
-            fg="#F8FAFC",
-            font=("Segoe UI Semibold", 14),
-        ).pack(side="left", padx=(8, 0))
+        footer_wrap = tk.Frame(self.root, bg=theme.SURFACE)
+        footer_wrap.pack(fill="x", side="bottom")
+        tk.Frame(footer_wrap, bg=theme.BORDER, height=1).pack(fill="x")
+        footer = tk.Frame(footer_wrap, bg=theme.SURFACE, padx=28, pady=12)
+        footer.pack(fill="x")
+        self._build_actions(footer)
 
-        self._label(panel, "指定路徑", self.path_var, wraplength=650)
-        self._label(panel, "媒體統計", self.counts_var)
-        self._label(panel, "分析進度", self.progress_var)
-        self._label(panel, "目前項目", self.current_var)
-        self._label(panel, "雲端強化", self.gemini_var)
-        self._label(panel, "異常統計", self.failure_var)
+        body = tk.Frame(self.root, bg=theme.BG, padx=28, pady=16)
+        body.pack(fill="both", expand=True)
+        self.stepper = theme.Stepper(tk, body, self.STEPS)
+        self.stepper.frame.pack(anchor="w", pady=(0, 14))
+        columns = tk.Frame(body, bg=theme.BG)
+        columns.pack(fill="both", expand=True)
+        columns.columnconfigure(0, minsize=420)
+        columns.columnconfigure(1, weight=1)
+        columns.rowconfigure(0, weight=1)
+        left = tk.Frame(columns, bg=theme.BG)
+        left.grid(row=0, column=0, sticky="nsew")
+        right = tk.Frame(columns, bg=theme.BG)
+        right.grid(row=0, column=1, sticky="nsew", padx=(16, 0))
+        self._build_source_card(left)
+        self._build_mode_card(left)
+        self._build_progress_card(right)
 
-        style = ttk.Style(self.root)
-        style.theme_use("clam")
-        style.configure(
-            "Catalog.Horizontal.TProgressbar",
-            troughcolor="#272F42",
-            background="#22C55E",
-            bordercolor="#475569",
-            lightcolor="#22C55E",
-            darkcolor="#22C55E",
-            thickness=16,
-        )
-        self.progress = ttk.Progressbar(
-            panel,
-            mode="determinate",
-            maximum=100,
-            style="Catalog.Horizontal.TProgressbar",
-        )
-        self.progress.pack(fill="x", pady=(12, 14))
+    def _build_header_actions(self, parent) -> None:
+        pass
 
-        buttons = tk.Frame(panel, bg="#0F172A")
-        buttons.pack(fill="x", side="bottom")
-        self.select_button = self._button(
-            buttons, "選擇資料夾", self._choose_folder
-        )
-        self.select_button.pack(side="left", padx=(0, 6))
-        self.start_button = self._button(buttons, "開始／繼續", self._start)
-        self.start_button.pack(side="left", padx=6)
-        self.force_button = self._button(
-            buttons,
-            "強制 Gemini 強化",
-            self._start_force_gemini,
-            background="#C2410C",
-            active_background="#EA580C",
-        )
-        self.force_button.pack(side="left", padx=6)
-        self.stop_button = self._button(buttons, "安全停止", self._safe_stop)
-        self.stop_button.pack(side="left", padx=6)
-        self.excel_button = self._button(
-            buttons,
-            "開啟 Excel",
-            lambda: self._open_workspace_path("excel"),
-        )
-        self.excel_button.pack(side="left", padx=6)
-        self.result_button = self._button(
-            buttons,
-            "開啟成果資料夾",
-            lambda: self._open_workspace_path("result"),
-        )
-        self.result_button.pack(side="left", padx=6)
+    def _source_tiles(self):
+        return (("影片", self.video_tile_var), ("照片", self.image_tile_var),
+                ("總容量", self.size_tile_var))
 
-    def _label(self, parent, title: str, variable, *, wraplength: int = 0) -> None:
-        row = self.tk.Frame(parent, bg="#1E293B", padx=14, pady=6)
-        row.pack(fill="x", pady=3)
-        self.tk.Label(
-            row,
-            text=title,
-            width=10,
-            anchor="w",
-            bg="#1E293B",
-            fg="#94A3B8",
-            font=("Segoe UI", 10),
-        ).pack(side="left")
-        self.tk.Label(
-            row,
-            textvariable=variable,
-            anchor="w",
-            justify="left",
-            wraplength=wraplength,
-            bg="#1E293B",
-            fg="#F8FAFC",
-            font=("Segoe UI", 11),
-        ).pack(side="left", fill="x", expand=True)
+    def _build_source_card(self, parent) -> None:
+        tk = self.tk
+        card = theme.card(tk, parent)
+        card.pack(fill="x")
+        theme.section_title(tk, card, self.SOURCE_TITLE)
+        path_box = tk.Frame(card, bg=theme.SURFACE_ALT, padx=12, pady=8,
+                            highlightthickness=1, highlightbackground=theme.DIVIDER)
+        path_box.pack(fill="x", pady=(10, 10))
+        # Fixed two-line height: a long path must not push the layout around.
+        tk.Label(path_box, textvariable=self.path_var, bg=theme.SURFACE_ALT, fg=theme.TEXT,
+                 font=theme.font(10), anchor="nw", justify="left", wraplength=360,
+                 height=2).pack(fill="x")
+        self.select_button = self._button(card, "選擇資料夾…", self._choose_folder)
+        self.select_button.pack(anchor="w")
+        tiles = tk.Frame(card, bg=theme.SURFACE)
+        tiles.pack(fill="x", pady=(12, 0))
+        for index, (title, variable) in enumerate(self._source_tiles()):
+            tile = theme.StatTile(tk, tiles, title, variable)
+            tile.frame.grid(row=0, column=index, sticky="ew", padx=(0 if index == 0 else 8, 0))
+            tiles.columnconfigure(index, weight=1, uniform="tiles")
 
-    def _button(
-        self,
-        parent,
-        text: str,
-        command,
-        *,
-        background: str = "#334155",
-        active_background: str = "#475569",
-    ):
-        return self.tk.Button(
-            parent,
-            text=text,
-            command=command,
-            bg=background,
-            fg="#F8FAFC",
-            activebackground=active_background,
-            activeforeground="#FFFFFF",
-            relief="flat",
-            bd=0,
-            padx=14,
-            pady=8,
-            font=("Segoe UI Semibold", 10),
-            cursor="hand2",
-            takefocus=True,
+    def _build_mode_card(self, parent) -> None:
+        tk = self.tk
+        card = theme.card(tk, parent)
+        card.pack(fill="x", pady=(14, 0))
+        theme.section_title(tk, card, "分析方式")
+        self.local_choice = theme.ChoiceCard(
+            tk, card, variable=self.mode_var, value=MODE_LOCAL, title="本機分析",
+            description=self._local_mode_description(), badge="免費",
         )
+        self.local_choice.frame.pack(fill="x", pady=(10, 8))
+        self.gemini_choice = theme.ChoiceCard(
+            tk, card, variable=self.mode_var, value=MODE_GEMINI, title="Gemini 雲端強化",
+            description="重新分析未審核項目；只上傳縮小預覽圖，開始前會先顯示請求上限並請你確認。",
+            accent=theme.WARN, accent_soft=theme.WARN_SOFT, badge="可能計費",
+        )
+        self.gemini_choice.frame.pack(fill="x")
+        self._build_gemini_options(card)
+        self.mode_var.trace_add("write", lambda *_args: self._apply_control_state())
+
+    def _local_mode_description(self) -> str:
+        return "在這台電腦上辨識；結果資訊不足時才自動請 Gemini 補強（需已設定 Key）。"
+
+    def _build_gemini_options(self, parent) -> None:
+        self.tk.Label(parent, text="Gemini 金鑰從環境變數 GEMINI_API_KEY 讀取。",
+                      bg=theme.SURFACE, fg=theme.TEXT_FAINT, font=theme.font(9),
+                      anchor="w").pack(fill="x", pady=(8, 0))
+
+    def _build_progress_card(self, parent) -> None:
+        tk = self.tk
+        card = theme.card(tk, parent)
+        card.pack(fill="both", expand=True)
+        theme.section_title(tk, card, "分析進度")
+        headline = tk.Frame(card, bg=theme.SURFACE)
+        headline.pack(fill="x", pady=(8, 0))
+        self.percent_label = tk.Label(headline, textvariable=self.percent_var, bg=theme.SURFACE,
+                                      fg=theme.TEXT, font=theme.font(30, "bold"))
+        self.percent_label.pack(side="left")
+        tk.Label(headline, textvariable=self.detail_var, bg=theme.SURFACE, fg=theme.TEXT_MUTED,
+                 font=theme.font(10), anchor="w", justify="left", wraplength=360
+                 ).pack(side="left", padx=(16, 0), pady=(10, 0), fill="x", expand=True)
+        self.progress = self.ttk.Progressbar(card, mode="determinate", maximum=100,
+                                             style="Accent.Horizontal.TProgressbar")
+        self.progress.pack(fill="x", pady=(10, 12))
+        metrics = tk.Frame(card, bg=theme.SURFACE)
+        metrics.pack(fill="x")
+        self.failure_label = tk.Label(metrics, textvariable=self.failure_var, bg=theme.SURFACE,
+                                      fg=theme.TEXT_MUTED, font=theme.font(10))
+        self.failure_label.pack(side="left")
+        tk.Label(metrics, textvariable=self.gemini_var, bg=theme.SURFACE, fg=theme.TEXT_MUTED,
+                 font=theme.font(10)).pack(side="right")
+        tk.Label(metrics, text="本片 Gemini 用量", bg=theme.SURFACE, fg=theme.TEXT_FAINT,
+                 font=theme.font(9)).pack(side="right", padx=(0, 6))
+        theme.divider(tk, card)
+        tk.Label(card, text="目前項目", bg=theme.SURFACE, fg=theme.TEXT_MUTED, font=theme.font(9),
+                 anchor="w").pack(fill="x")
+        current_label = tk.Label(card, textvariable=self.current_var, bg=theme.SURFACE,
+                                 fg=theme.TEXT, font=theme.font(11, "bold"), anchor="w",
+                                 justify="left", wraplength=500)
+        current_label.pack(fill="x", pady=(2, 0))
+        theme.auto_wrap(current_label, margin=4)
+        self._build_progress_extras(card)
+        hint = tk.Frame(card, bg=theme.INFO_SOFT, padx=12, pady=9)
+        hint.pack(fill="x", side="bottom", pady=(12, 0))
+        tk.Label(hint, text="下一步", bg=theme.INFO_SOFT, fg=theme.INFO, font=theme.font(9, "bold")
+                 ).pack(side="left", anchor="n")
+        hint_label = tk.Label(hint, textvariable=self.hint_var, bg=theme.INFO_SOFT, fg=theme.TEXT,
+                              font=theme.font(9), anchor="w", justify="left", wraplength=440)
+        hint_label.pack(side="left", padx=(10, 0), fill="x", expand=True)
+        theme.auto_wrap(hint_label, margin=4)
+
+    HINTS = (
+        "按「選擇資料夾…」挑選要整理的資料夾；程式只讀取原始檔案，不會移動或修改。",
+        "正在掃描資料夾並建立清冊；完成後選擇分析方式，再按開始。",
+        "選好分析方式後按開始；中途可按「安全停止」，下次會從保存的進度繼續。",
+        "分析完成。開啟 Excel 清冊檢閱結果，確認無誤的列可把狀態改成「已審核」。",
+    )
+    BUSY_HINT = "分析進行中，可以關閉 Excel 但不要移動來源檔案；需要中斷時按「安全停止」。"
+
+    def _build_progress_extras(self, card) -> None:
+        pass
+
+    def _build_actions(self, footer) -> None:
+        self.start_button = self._button(footer, "開始／繼續分析", self._primary_action,
+                                         variant="primary", size="large")
+        self.start_button.pack(side="left")
+        self.stop_button = self._button(footer, "安全停止", self._safe_stop, variant="danger",
+                                        size="large")
+        self.stop_button.pack(side="left", padx=(10, 0))
+        self.result_button = self._button(footer, "開啟成果資料夾",
+                                          lambda: self._open_workspace_path("result"))
+        self.result_button.pack(side="right")
+        self.excel_button = self._button(footer, "開啟 Excel 清冊",
+                                         lambda: self._open_workspace_path("excel"))
+        self.excel_button.pack(side="right", padx=(0, 10))
+
+    def _button(self, parent, text: str, command, *, variant: str = "secondary",
+                size: str = "normal"):
+        return theme.button(self.tk, parent, text, command, variant=variant, size=size)
+
+    @property
+    def gemini_selected(self) -> bool:
+        mode_var = getattr(self, "mode_var", None)
+        return mode_var is not None and mode_var.get().startswith("Gemini")
+
+    def _primary_action(self) -> None:
+        if self.gemini_selected:
+            self._start_force_gemini()
+        else:
+            self._start()
+
+    def _stage(self, model: StatusViewModel) -> int:
+        if self.workspace is None:
+            return 0
+        text = model.status_text
+        if not self.workspace.excel_path.is_file():
+            return 1
+        if "清冊" in text and ("建立" in text or "更新" in text):
+            return 1
+        if text.startswith("已完成"):
+            return 3
+        return 2
 
     def _start(self) -> None:
         if self.workspace is None or self.media_root is None:
@@ -588,21 +686,37 @@ class StatusApplication:
         )
 
     def _render(self, model: StatusViewModel) -> None:
-        color = "#22C55E" if model.light_color == "green" else "#EF4444"
-        self.light.itemconfigure(self.light_dot, fill=color)
+        self.status_pill.set_tone(theme.status_tone(model.status_text, model.light_color))
         self.status_var.set(model.status_text)
         self.path_var.set(model.root_text)
         self.counts_var.set(
             f"影片：{model.video_count}　影像：{model.image_count}"
             f"　總容量：{model.total_size_text}"
         )
+        self.video_tile_var.set(str(model.video_count))
+        self.image_tile_var.set(str(model.image_count))
+        self.size_tile_var.set(model.total_size_text)
         self.progress_var.set(
             f"進度：{model.progress_text}　未完成：{model.remaining_text}"
         )
-        self.current_var.set(f"目前：{model.current_text}")
-        self.gemini_var.set(f"Gemini 強化：{model.gemini_text}")
+        idle_total = model.progress_text == "0 / 0"
+        self.percent_var.set(f"{model.progress_percent}%")
+        self.percent_label.configure(fg=theme.TEXT_FAINT if idle_total else theme.TEXT)
+        self.detail_var.set(
+            "尚未開始分析" if idle_total
+            else progress_detail(model.progress_text, model.remaining_text)
+        )
+        self.current_var.set(model.current_text)
+        self.gemini_var.set(model.gemini_text)
         self.failure_var.set(model.failure_text)
+        has_failures = not model.failure_text.rstrip().endswith("：0")
+        self.failure_label.configure(fg=theme.DANGER if has_failures else theme.TEXT_MUTED)
         self.progress["value"] = model.progress_percent
+        stage = self._stage(model)
+        self._last_stage = stage
+        self.stepper.set_active(stage)
+        busy = bool(getattr(self.supervisor, "is_busy", False))
+        self.hint_var.set(self.BUSY_HINT if busy and stage == 2 else self.HINTS[stage])
 
     def _safe_stop(self) -> None:
         self.supervisor.request_safe_stop()
@@ -614,28 +728,49 @@ class StatusApplication:
             and self.workspace.database_path.is_file()
             and self.workspace.excel_path.is_file()
         )
+        busy = self.supervisor.is_busy
         state = ControlState.from_context(
             has_workspace=has_workspace,
             has_outputs=has_outputs,
-            busy=self.supervisor.is_busy,
+            busy=busy,
         )
+        gemini = self.gemini_selected
         self.select_button.configure(
             state="normal" if state.select_enabled else "disabled"
         )
-        self.start_button.configure(
-            state="normal" if state.start_enabled else "disabled"
-        )
-        self.force_button.configure(
-            state=(
-                "normal" if state.force_start_enabled else "disabled"
-            )
-        )
+        start_enabled = state.force_start_enabled if gemini else state.start_enabled
+        self.start_button.configure(state="normal" if start_enabled else "disabled")
+        self._label_primary_action(busy=busy, gemini=gemini, has_outputs=has_outputs)
+        self.local_choice.set_enabled(not busy)
+        self.gemini_choice.set_enabled(not busy)
         self.stop_button.configure(
             state="normal" if state.stop_enabled else "disabled"
         )
         output_state = "normal" if state.open_outputs_enabled else "disabled"
         self.excel_button.configure(state=output_state)
         self.result_button.configure(state=output_state)
+
+    def _label_primary_action(self, *, busy: bool, gemini: bool, has_outputs: bool) -> None:
+        completed = getattr(self, "_last_stage", 0) == 3
+        if busy:
+            text = "處理中…"
+        elif completed and not gemini:
+            text = "重新檢查並繼續"
+        elif gemini:
+            text = "開始 Gemini 強化"
+        elif self.workspace is not None and not has_outputs:
+            text = "建立清冊"
+        else:
+            text = "開始／繼續分析"
+        self.start_button.configure(text=text)
+        if gemini:
+            self.start_button.set_variant("warn")
+        else:
+            self.start_button.set_variant("secondary" if completed and not busy else "primary")
+        # After a finished run, reviewing the workbook is the next step.
+        self.excel_button.set_variant("primary" if completed and not busy else "secondary")
+        # Exactly one highlighted next action: pick a folder first, then start.
+        self.select_button.set_variant("primary" if self.workspace is None else "secondary")
 
     def _open_workspace_path(self, kind: str) -> None:
         if self.workspace is None:
@@ -682,6 +817,7 @@ def _parser() -> argparse.ArgumentParser:
 def _create_tk_root():
     import tkinter as tk
 
+    theme.enable_high_dpi()
     try:
         return tk.Tk()
     except tk.TclError as error:
