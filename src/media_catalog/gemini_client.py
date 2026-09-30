@@ -20,7 +20,55 @@ _MODEL_NAME = re.compile(r"^[A-Za-z0-9._-]+$")
 
 
 class GeminiError(RuntimeError):
-    pass
+    """``reason`` is a short, key-free category stored with failed segments;
+    ``retryable`` tells the stage runner whether another attempt can help."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        reason: str | None = None,
+        retryable: bool = True,
+        status: int | None = None,
+        retry_after_seconds: float = 0.0,
+    ) -> None:
+        super().__init__(message)
+        self.reason = reason
+        self.retryable = retryable
+        self.status = status
+        self.retry_after_seconds = retry_after_seconds
+
+
+def _http_error(status: int, retry_after: str | None) -> GeminiError:
+    if status == 429:
+        reason, retryable = "rate_limited", True
+    elif status in (401, 403):
+        reason, retryable = "auth", False
+    elif status == 408 or status >= 500:
+        reason, retryable = "server", True
+    else:
+        reason, retryable = "request_rejected", False
+    try:
+        delay = float(retry_after) if retry_after else (5.0 if status == 429 else 0.0)
+    except ValueError:
+        delay = 5.0 if status == 429 else 0.0
+    return GeminiError(
+        f"HTTP {status}",
+        reason=reason,
+        retryable=retryable,
+        status=status,
+        retry_after_seconds=delay,
+    )
+
+
+def _rewrap(error: GeminiError, message: str) -> GeminiError:
+    return GeminiError(
+        message,
+        reason=error.reason,
+        retryable=error.retryable,
+        status=error.status,
+        retry_after_seconds=error.retry_after_seconds,
+    )
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,19 +92,9 @@ class GeminiTransport(Protocol):
 
 class UrllibGeminiTransport:
     def get(self, url: str, *, headers: dict[str, str], timeout: float) -> dict[str, object]:
-        request = urllib.request.Request(url, headers=headers, method="GET")
-        try:
-            with urllib.request.urlopen(request, timeout=timeout) as response:
-                payload = json.loads(response.read().decode("utf-8"))
-        except urllib.error.HTTPError as error:
-            raise RuntimeError(f"HTTP {error.code}") from error
-        except urllib.error.URLError as error:
-            raise RuntimeError(f"network {type(error.reason).__name__}") from error
-        except json.JSONDecodeError as error:
-            raise RuntimeError("provider returned invalid JSON") from error
-        if not isinstance(payload, dict):
-            raise RuntimeError("provider returned a non-object response")
-        return payload
+        return self._request(
+            urllib.request.Request(url, headers=headers, method="GET"), timeout
+        )
 
     def send(
         self,
@@ -66,23 +104,39 @@ class UrllibGeminiTransport:
         body: dict[str, object],
         timeout: float,
     ) -> dict[str, object]:
-        request = urllib.request.Request(
-            url,
-            data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
-            headers=headers,
-            method="POST",
+        return self._request(
+            urllib.request.Request(
+                url,
+                data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+                headers=headers,
+                method="POST",
+            ),
+            timeout,
         )
+
+    @staticmethod
+    def _request(request: urllib.request.Request, timeout: float) -> dict[str, object]:
         try:
             with urllib.request.urlopen(request, timeout=timeout) as response:
                 payload = json.loads(response.read().decode("utf-8"))
         except urllib.error.HTTPError as error:
-            raise RuntimeError(f"HTTP {error.code}") from error
+            raise _http_error(
+                error.code, error.headers.get("Retry-After") if error.headers else None
+            ) from error
         except urllib.error.URLError as error:
-            raise RuntimeError(f"network {type(error.reason).__name__}") from error
+            raise GeminiError(
+                f"network {type(error.reason).__name__}", reason="network"
+            ) from error
+        except TimeoutError as error:
+            raise GeminiError("network timeout", reason="network") from error
         except json.JSONDecodeError as error:
-            raise RuntimeError("provider returned invalid JSON") from error
+            raise GeminiError(
+                "provider returned invalid JSON", reason="invalid_response"
+            ) from error
         if not isinstance(payload, dict):
-            raise RuntimeError("provider returned a non-object response")
+            raise GeminiError(
+                "provider returned a non-object response", reason="invalid_response"
+            )
         return payload
 
 
@@ -103,7 +157,9 @@ class GeminiClient:
 
         key = (os.getenv("GEMINI_API_KEY", "") if key is None else key).strip()
         if not key:
-            raise GeminiError("GEMINI_API_KEY is not configured")
+            raise GeminiError(
+                "GEMINI_API_KEY is not configured", reason="no_key", retryable=False
+            )
         models: list[dict[str, object]] = []
         token = ""
         seen: set[str] = set()
@@ -128,8 +184,10 @@ class GeminiClient:
                 token = next_token
             self.model = select_latest_stable_flash(models)
             return self.model
-        except GeminiError:
-            raise
+        except GeminiError as error:
+            if error.status is None:
+                raise
+            raise _rewrap(error, f"Gemini model discovery failed: {error}") from error
         except Exception as error:
             message = (str(error).splitlines() or [type(error).__name__])[0].replace(key, "[REDACTED]")[:240]
             raise GeminiError(f"Gemini model discovery failed: {message}") from error
@@ -141,7 +199,9 @@ class GeminiClient:
     def analyze(self, request: GeminiSegmentRequest) -> Analysis:
         key = os.getenv("GEMINI_API_KEY", "").strip()
         if not key:
-            raise GeminiError("GEMINI_API_KEY is not configured")
+            raise GeminiError(
+                "GEMINI_API_KEY is not configured", reason="no_key", retryable=False
+            )
         model = self.model or self.discover_model()
         if _MODEL_NAME.fullmatch(model) is None:
             raise GeminiError("GEMINI_MODEL contains unsupported characters")
@@ -165,10 +225,14 @@ class GeminiClient:
             )
             raw_analysis = self._response_text(payload)
             return LocalAnalyzer._parse_analysis(raw_analysis)
-        except GeminiError:
-            raise
+        except GeminiError as error:
+            if error.status is None:
+                raise
+            raise _rewrap(error, f"Gemini request failed: {error}") from error
         except AnalysisError as error:
-            raise GeminiError("Gemini response schema is invalid") from error
+            raise GeminiError(
+                "Gemini response schema is invalid", reason="invalid_response"
+            ) from error
         except Exception as error:
             message = str(error).splitlines()[0] if str(error) else type(error).__name__
             redacted = message.replace(key, "[REDACTED]")[:240]
@@ -213,6 +277,22 @@ class GeminiClient:
 
     @staticmethod
     def _response_text(payload: dict[str, object]) -> str:
+        feedback = payload.get("promptFeedback")
+        if isinstance(feedback, dict) and feedback.get("blockReason"):
+            raise GeminiError(
+                f"Gemini blocked the request: {feedback.get('blockReason')}",
+                reason="blocked",
+                retryable=False,
+            )
+        candidates = payload.get("candidates")
+        if isinstance(candidates, list) and candidates and isinstance(candidates[0], dict):
+            finish = candidates[0].get("finishReason")
+            if finish in {"SAFETY", "RECITATION", "BLOCKLIST", "PROHIBITED_CONTENT", "SPII"}:
+                raise GeminiError(
+                    f"Gemini stopped the response: {finish}",
+                    reason="blocked",
+                    retryable=False,
+                )
         try:
             candidates = payload["candidates"]
             candidate = candidates[0]
@@ -223,5 +303,7 @@ class GeminiClient:
                 if isinstance(part, dict) and isinstance(part.get("text"), str)
             )
         except (KeyError, IndexError, StopIteration, TypeError) as error:
-            raise GeminiError("Gemini response schema is invalid") from error
+            raise GeminiError(
+                "Gemini response schema is invalid", reason="invalid_response"
+            ) from error
         return text

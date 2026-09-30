@@ -12,7 +12,7 @@ from typing import Protocol
 
 from .analysis_mode import AnalysisMode
 from .database import CatalogDatabase
-from .process_utils import HIDDEN_PROCESS_CREATION_FLAGS
+from .process_utils import HIDDEN_PROCESS_CREATION_FLAGS, terminate_process_tree
 from .run_state import AnalysisRun, RunStateStore
 from .workspace import MediaWorkspace, WorkspacePathError
 
@@ -287,7 +287,7 @@ class WorkerSupervisor:
         if now - self._stale_since < 10:
             return SupervisorSnapshot("stopping_stale_worker", True, run)
 
-        self.process.terminate()
+        terminate_process_tree(self.process)
         wait = getattr(self.process, "wait", None)
         if callable(wait):
             try:

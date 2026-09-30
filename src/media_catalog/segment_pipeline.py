@@ -22,6 +22,12 @@ class SafeStopRequested(AnalysisError):
     pass
 
 
+def _cloud_failure(result) -> str:
+    # e.g. cloud_failed:rate_limited / cloud_failed:auth, so a 429 can be told
+    # apart from a bad key or a safety block when reviewing the catalog.
+    return f"cloud_failed:{result.error_reason or result.error_type or 'unknown'}"
+
+
 @dataclass(frozen=True, slots=True)
 class VideoAnalysisResult:
     description: str
@@ -257,7 +263,7 @@ class SegmentPipeline:
                     cloud_analysis = cloud.value
                 else:
                     needs_review = True
-                    error = f"cloud_failed:{cloud.error_type or 'unknown'}"
+                    error = _cloud_failure(cloud)
                 retry_count_increment += max(0, cloud.attempts - 1)
             else:
                 needs_review = True
@@ -352,7 +358,7 @@ class SegmentPipeline:
                 error=(
                     None
                     if cloud_analysis is not None
-                    else f"cloud_failed:{cloud.error_type or 'unknown'}"
+                    else _cloud_failure(cloud)
                 ),
                 retry_count_increment=max(0, cloud.attempts - 1),
             )

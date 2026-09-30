@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import os
+import sys
 import threading
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from types import TracebackType
@@ -11,8 +13,16 @@ from typing import Generic, Protocol, TypeVar
 T = TypeVar("T")
 
 
+# Longest pause honoured from a provider's Retry-After hint.
+MAX_RETRY_DELAY_SECONDS = 30.0
+
+
 @dataclass(frozen=True, slots=True)
 class StagePolicy:
+    """``timeout_seconds`` is handed to the operation as a budget hint; the
+    hard limits are the per-subprocess and per-request timeouts inside each
+    stage, because a Python thread cannot be interrupted safely."""
+
     timeout_seconds: float
     retries: int = 1
 
@@ -24,9 +34,27 @@ class StageResult(Generic[T]):
     attempts: int
     error_type: str | None
     error_message: str | None
+    error_reason: str | None = None
+
+
+def is_retryable(error: BaseException) -> bool:
+    """Errors may set ``retryable = False`` (bad key, HTTP 400, safety block);
+    retrying those only burns time and quota."""
+    return bool(getattr(error, "retryable", True))
+
+
+def retry_delay_seconds(error: BaseException) -> float:
+    try:
+        delay = float(getattr(error, "retry_after_seconds", 0) or 0)
+    except (TypeError, ValueError):
+        return 0.0
+    return min(max(delay, 0.0), MAX_RETRY_DELAY_SECONDS)
 
 
 class StageRunner:
+    def __init__(self, *, sleep: Callable[[float], None] = time.sleep) -> None:
+        self._sleep = sleep
+
     def run(
         self,
         name: str,
@@ -45,7 +73,10 @@ class StageRunner:
             try:
                 value = operation(policy.timeout_seconds)
             except Exception as error:
-                if attempts <= policy.retries:
+                if attempts <= policy.retries and is_retryable(error):
+                    delay = retry_delay_seconds(error)
+                    if delay:
+                        self._sleep(delay)
                     continue
                 return StageResult(
                     ok=False,
@@ -53,6 +84,7 @@ class StageRunner:
                     attempts=attempts,
                     error_type=type(error).__name__,
                     error_message=_short_error(error),
+                    error_reason=getattr(error, "reason", None),
                 )
             return StageResult(
                 ok=True,
@@ -123,5 +155,13 @@ class HeartbeatThread:
                 self._store.heartbeat(self._run_id, self._worker_pid)
                 self.last_error = None
             except Exception as error:
+                if self.last_error is None:
+                    # Surface the first failure; a silent heartbeat thread
+                    # makes the supervisor kill a healthy worker unexplained.
+                    print(
+                        f"MEDIA_ANALYSIS_HEARTBEAT_ERROR {type(error).__name__}: {error}",
+                        file=sys.stderr,
+                        flush=True,
+                    )
                 self.last_error = error
             self._stop.wait(self._interval_seconds)

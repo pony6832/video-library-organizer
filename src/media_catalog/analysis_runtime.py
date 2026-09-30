@@ -68,10 +68,16 @@ def _preflight(
         ) from error
 
 
+def _with_default_tag(model: str) -> str:
+    # Ollama lists untagged pulls as "name:latest".
+    name = model.casefold()
+    return name if ":" in name.rsplit("/", 1)[-1] else f"{name}:latest"
+
+
 def _installed_models(output: str) -> set[str]:
     lines = [line.strip() for line in output.splitlines() if line.strip()]
     return {
-        line.split(maxsplit=1)[0].casefold()
+        _with_default_tag(line.split(maxsplit=1)[0])
         for line in lines[1:]
         if line.split(maxsplit=1)
     }
@@ -93,7 +99,7 @@ def build_local_analyzer(
     if model_check.returncode != 0:
         detail = model_check.stderr.strip() or "unknown error"
         raise RuntimePreflightError(f"Ollama 無法使用：{detail}")
-    if model.casefold() not in _installed_models(model_check.stdout):
+    if _with_default_tag(model) not in _installed_models(model_check.stdout):
         raise RuntimePreflightError(f"找不到本機 Ollama 模型：{model}")
 
     ffmpeg_check = _preflight(runner, [ffmpeg_executable, "-version"])
@@ -171,7 +177,9 @@ def build_local_analyzer(
         gemini_client=gemini_client,
         store=run_state,
         output_root=analysis_output / "segments",
-        evidence_extractor=evidence_extractor,
+        # Only MCP returns OCR text; running watch here cost minutes per video
+        # and its result was discarded.
+        evidence_extractor=mcp,
     )
     force_image_analyzer = ForceImageAnalyzer(
         local_analyzer=local_analyzer,

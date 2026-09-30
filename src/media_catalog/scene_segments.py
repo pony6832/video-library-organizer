@@ -10,13 +10,27 @@ from pathlib import Path
 
 from PIL import Image
 
-from .process_utils import HIDDEN_PROCESS_CREATION_FLAGS, credential_free_environment
+from .process_utils import (
+    HIDDEN_PROCESS_CREATION_FLAGS,
+    credential_free_environment,
+    run_process_tree,
+)
 
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 SCENE_THRESHOLD = 0.35
 MAX_SEGMENT_SECONDS = 300.0
 MIN_TAIL_SECONDS = 2.0
+# Fast-cut footage can produce hundreds of scene changes; each segment costs
+# three ffmpeg calls and one local model call, so merge slivers and cap the
+# total (Gemini only ever sees 12 segments per video anyway).
+MIN_SEGMENT_SECONDS = 2.0
+MAX_SEGMENTS = 60
+# Scene scores are computed on a downscaled copy; full-resolution decoding of
+# 4K footage made detection several times slower for no accuracy gain.
+SCENE_DETECTION_WIDTH = 320
+# One-frame seeks finish in seconds; a hung call must not wait 20 minutes.
+FRAME_EXTRACTION_TIMEOUT_SECONDS = 120.0
 _PTS_TIME = re.compile(r"pts_time:(\d+(?:\.\d+)?)")
 
 
@@ -34,11 +48,56 @@ class SegmentRange:
         return self.end_seconds - self.start_seconds
 
 
+def _merge_ranges(
+    ranges: list[SegmentRange],
+    *,
+    min_seconds: float,
+    max_seconds: float,
+) -> list[SegmentRange]:
+    merged: list[SegmentRange] = []
+    for item in ranges:
+        if (
+            merged
+            and (merged[-1].duration < min_seconds or item.duration < min_seconds)
+            and item.end_seconds - merged[-1].start_seconds <= max_seconds
+        ):
+            merged[-1] = SegmentRange(merged[-1].start_seconds, item.end_seconds)
+        else:
+            merged.append(item)
+    return merged
+
+
+def consolidate_ranges(
+    ranges: Iterable[SegmentRange],
+    *,
+    min_seconds: float = MIN_SEGMENT_SECONDS,
+    max_seconds: float = MAX_SEGMENT_SECONDS,
+    max_count: int = MAX_SEGMENTS,
+) -> list[SegmentRange]:
+    merged = _merge_ranges(
+        list(ranges), min_seconds=min_seconds, max_seconds=max_seconds
+    )
+    if len(merged) <= max_count or not merged:
+        return merged
+    total = merged[-1].end_seconds - merged[0].start_seconds
+    target = total / max_count
+    while len(merged) > max_count and target <= max_seconds:
+        grown = _merge_ranges(merged, min_seconds=target, max_seconds=max_seconds)
+        if len(grown) == len(merged):
+            break
+        merged = grown
+        target *= 1.25
+    return merged
+
+
 def build_ranges(
     duration: float,
     scene_times: Iterable[float],
     max_seconds: float = MAX_SEGMENT_SECONDS,
     min_tail: float = MIN_TAIL_SECONDS,
+    *,
+    min_segment_seconds: float = MIN_SEGMENT_SECONDS,
+    max_segments: int = MAX_SEGMENTS,
 ) -> tuple[SegmentRange, ...]:
     duration = float(duration)
     max_seconds = float(max_seconds)
@@ -68,6 +127,12 @@ def build_ranges(
         if raw_end > start:
             ranges.append(SegmentRange(start, raw_end))
 
+    ranges = consolidate_ranges(
+        ranges,
+        min_seconds=min(min_segment_seconds, max_seconds),
+        max_seconds=max_seconds,
+        max_count=max_segments,
+    )
     if len(ranges) > 1 and ranges[-1].duration < min_tail:
         previous = ranges[-2]
         tail = ranges[-1]
@@ -90,13 +155,15 @@ class SceneSegmenter:
         *,
         ffmpeg_executable: str = "ffmpeg",
         ffprobe_executable: str = "ffprobe",
-        runner: Runner = subprocess.run,
+        runner: Runner = run_process_tree,
         timeout_seconds: float = 1200,
+        frame_timeout_seconds: float = FRAME_EXTRACTION_TIMEOUT_SECONDS,
     ) -> None:
         self.ffmpeg_executable = ffmpeg_executable
         self.ffprobe_executable = ffprobe_executable
         self.runner = runner
         self.timeout_seconds = timeout_seconds
+        self.frame_timeout_seconds = min(frame_timeout_seconds, timeout_seconds)
 
     def segment(self, source: Path) -> tuple[SegmentRange, ...]:
         media_path = self._source_file(source)
@@ -130,6 +197,7 @@ class SceneSegmenter:
                 "-i",
                 str(media_path),
                 "-vf",
+                f"scale={SCENE_DETECTION_WIDTH}:-2,"
                 f"select=gt(scene\\,{SCENE_THRESHOLD}),showinfo",
                 "-an",
                 "-f",
@@ -183,7 +251,8 @@ class SceneSegmenter:
                     "2",
                     "-y",
                     str(output),
-                ]
+                ],
+                timeout=self.frame_timeout_seconds,
             )
             if result.returncode != 0:
                 raise SceneSegmentationError(
@@ -198,7 +267,9 @@ class SceneSegmenter:
             candidates.append(output)
         return tuple(candidates)
 
-    def _run(self, arguments: list[str]) -> subprocess.CompletedProcess[str]:
+    def _run(
+        self, arguments: list[str], *, timeout: float | None = None
+    ) -> subprocess.CompletedProcess[str]:
         try:
             return self.runner(
                 arguments,
@@ -206,7 +277,7 @@ class SceneSegmenter:
                 text=True,
                 encoding="utf-8",
                 errors="replace",
-                timeout=self.timeout_seconds,
+                timeout=self.timeout_seconds if timeout is None else timeout,
                 check=False,
                 creationflags=HIDDEN_PROCESS_CREATION_FLAGS,
                 env=credential_free_environment(),

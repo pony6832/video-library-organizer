@@ -333,3 +333,180 @@ def test_refresh_loop_survives_database_errors() -> None:
 
     assert scheduled == [1000], "the refresh loop must keep running"
     assert "database is locked" in messages[0]
+
+
+# --- stage runner / gemini --------------------------------------------------
+
+def test_stage_runner_does_not_retry_permanent_errors() -> None:
+    from media_catalog.gemini_client import GeminiError
+    from media_catalog.stage_runner import StagePolicy, StageRunner
+
+    calls = []
+
+    def operation(_timeout):
+        calls.append(1)
+        raise GeminiError("HTTP 403", reason="auth", retryable=False)
+
+    result = StageRunner(sleep=lambda _s: None).run("gemini", operation, StagePolicy(90, 3))
+
+    assert calls == [1]
+    assert result.error_reason == "auth"
+
+
+def test_stage_runner_backs_off_on_rate_limit() -> None:
+    from media_catalog.gemini_client import GeminiError
+    from media_catalog.stage_runner import StagePolicy, StageRunner
+
+    sleeps = []
+    attempts = []
+
+    def operation(_timeout):
+        attempts.append(1)
+        if len(attempts) == 1:
+            raise GeminiError("HTTP 429", reason="rate_limited", retry_after_seconds=120)
+        return "ok"
+
+    result = StageRunner(sleep=sleeps.append).run("gemini", operation, StagePolicy(90, 1))
+
+    assert result.ok and result.value == "ok"
+    assert sleeps == [30.0], "Retry-After is honoured but capped"
+
+
+def _http_error(code, headers=None):
+    import io
+    import urllib.error
+    from email.message import Message
+
+    message = Message()
+    for key, value in (headers or {}).items():
+        message[key] = value
+    return urllib.error.HTTPError("https://x", code, "err", message, io.BytesIO(b""))
+
+
+@pytest.mark.parametrize(
+    ("code", "reason", "retryable"),
+    [(429, "rate_limited", True), (403, "auth", False), (400, "request_rejected", False), (503, "server", True)],
+)
+def test_transport_classifies_http_errors(monkeypatch, code, reason, retryable) -> None:
+    from media_catalog import gemini_client
+    from media_catalog.gemini_client import GeminiError, UrllibGeminiTransport
+
+    def urlopen(*_args, **_kwargs):
+        raise _http_error(code, {"Retry-After": "7"})
+
+    monkeypatch.setattr(gemini_client.urllib.request, "urlopen", urlopen)
+    with pytest.raises(GeminiError) as caught:
+        UrllibGeminiTransport().get("https://x", headers={}, timeout=1)
+
+    assert caught.value.reason == reason
+    assert caught.value.retryable is retryable
+    assert caught.value.status == code
+
+
+def test_client_keeps_http_category_without_leaking_key(monkeypatch, tmp_path) -> None:
+    from PIL import Image
+
+    from media_catalog.gemini_client import GeminiClient, GeminiError, GeminiSegmentRequest
+    from media_catalog.inference import Analysis
+
+    class Transport:
+        def send(self, *_args, **_kwargs):
+            raise GeminiError("HTTP 429", reason="rate_limited", status=429)
+
+    frame = tmp_path / "frame.jpg"
+    Image.new("RGB", (8, 8)).save(frame)
+    monkeypatch.setenv("GEMINI_API_KEY", "secret")
+    client = GeminiClient(transport=Transport())
+    client.model = "gemini-2.5-flash"
+
+    with pytest.raises(GeminiError) as caught:
+        client.analyze(GeminiSegmentRequest((frame,), "", Analysis("d", ("h",), ("k",))))
+
+    assert caught.value.reason == "rate_limited"
+    assert "Gemini request failed" in str(caught.value)
+    assert "secret" not in str(caught.value)
+
+
+def test_safety_block_is_reported_as_blocked() -> None:
+    from media_catalog.gemini_client import GeminiClient, GeminiError
+
+    with pytest.raises(GeminiError) as caught:
+        GeminiClient._response_text({"promptFeedback": {"blockReason": "SAFETY"}})
+
+    assert caught.value.reason == "blocked"
+    assert caught.value.retryable is False
+
+
+# --- segmentation / prompts ------------------------------------------------
+
+def test_fast_cut_video_is_capped_and_slivers_merged() -> None:
+    from media_catalog.scene_segments import MAX_SEGMENTS, build_ranges
+
+    cuts = [index * 0.8 for index in range(1, 750)]
+    ranges = build_ranges(600, cuts)
+
+    assert len(ranges) <= MAX_SEGMENTS
+    assert ranges[0].start_seconds == 0 and ranges[-1].end_seconds == 600
+    assert all(b.start_seconds == a.end_seconds for a, b in zip(ranges, ranges[1:]))
+    assert all(item.duration <= 300 for item in ranges)
+
+
+def test_long_summary_is_split_to_fit_command_line() -> None:
+    from media_catalog.inference import MAX_PROMPT_CHARACTERS, Analysis, LocalAnalyzer
+
+    prompts = []
+
+    class Recording(LocalAnalyzer):
+        def _invoke(self, visual_paths, prompt):
+            prompts.append(prompt)
+            return Analysis("摘要", ("重點",), ("關鍵字",))
+
+    analyses = [Analysis("很長的描述" * 200, ("重點",), ("關鍵字",)) for _ in range(60)]
+    result = Recording(model="m").summarize_segments(analyses)
+
+    assert result.description == "摘要"
+    assert len(prompts) > 1
+    assert all(len(prompt) <= MAX_PROMPT_CHARACTERS for prompt in prompts)
+
+
+def test_untagged_model_name_matches_latest() -> None:
+    from media_catalog.analysis_runtime import _installed_models, _with_default_tag
+
+    listing = "NAME ID SIZE MODIFIED\nllava:latest abc 4 GB now\nqwen3.5:9b def 6 GB now\n"
+    installed = _installed_models(listing)
+
+    assert _with_default_tag("llava") in installed
+    assert _with_default_tag("qwen3.5:9b") in installed
+    assert _with_default_tag("qwen3.5") not in installed
+
+
+def test_watch_output_directory_starts_empty(tmp_path: Path) -> None:
+    from media_catalog.inference import _output_directory
+
+    source = tmp_path / "clip.mp4"
+    source.write_bytes(b"v")
+    first = _output_directory(tmp_path / "out", source, "watch")
+    (first / "stale.jpg").write_bytes(b"old")
+
+    second = _output_directory(tmp_path / "out", source, "watch")
+
+    assert second == first
+    assert list(second.iterdir()) == []
+
+
+# --- processes ------------------------------------------------------------
+
+def test_run_process_tree_times_out_and_returns_output() -> None:
+    import subprocess
+    import sys
+    import time
+
+    from media_catalog.process_utils import run_process_tree
+
+    ok = run_process_tree([sys.executable, "-c", "print('hi')"], capture_output=True, text=True, timeout=30)
+    assert ok.returncode == 0 and ok.stdout.strip() == "hi"
+
+    started = time.monotonic()
+    with pytest.raises(subprocess.TimeoutExpired):
+        run_process_tree([sys.executable, "-c", "import time; time.sleep(60)"], capture_output=True, timeout=1)
+    assert time.monotonic() - started < 30

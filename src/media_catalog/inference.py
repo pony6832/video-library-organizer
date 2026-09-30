@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import subprocess
 import sys
 from collections import Counter
@@ -12,10 +13,18 @@ from pathlib import Path
 from typing import Callable, Protocol, Sequence
 from urllib.parse import urlparse
 
-from .process_utils import HIDDEN_PROCESS_CREATION_FLAGS, credential_free_environment
+from .process_utils import (
+    HIDDEN_PROCESS_CREATION_FLAGS,
+    credential_free_environment,
+    run_process_tree,
+)
 
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
+# Prompts travel on the ollama command line, which Windows caps at 32,767
+# characters; stay far below that with room for image paths.
+MAX_PROMPT_CHARACTERS = 16_000
+MAX_OCR_CHARACTERS = 2_000
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".webm"}
 SEMANTIC_VERSION = re.compile(r"^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$")
 
@@ -154,10 +163,49 @@ def _local_media_path(source: str | Path) -> Path:
 
 
 def _output_directory(output_root: Path, source: Path, backend: str) -> Path:
-    key = hashlib.sha256(str(source).casefold().encode("utf-8")).hexdigest()[:16]
+    # Key on size and mtime too, and start empty: rglob("*.jpg") would
+    # otherwise mix in frames left over from an older version of the file.
+    try:
+        source_stat = Path(source).stat()
+        identity = f"{str(source).casefold()}|{source_stat.st_size}|{source_stat.st_mtime_ns}"
+    except OSError:
+        identity = str(source).casefold()
+    key = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:16]
     destination = Path(output_root).resolve() / f"{backend}-{key}"
+    if destination.exists():
+        shutil.rmtree(destination, ignore_errors=True)
     destination.mkdir(parents=True, exist_ok=True)
     return destination
+
+
+def _run_tool(
+    runner: Runner,
+    arguments: list[str],
+    timeout: float,
+    *,
+    label: str,
+    exit_label: str | None = None,
+) -> subprocess.CompletedProcess[str]:
+    try:
+        result = runner(
+            arguments,
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=timeout,
+            check=False,
+            env=_offline_environment(),
+            creationflags=HIDDEN_PROCESS_CREATION_FLAGS,
+        )
+    except (OSError, subprocess.TimeoutExpired) as error:
+        raise AnalysisError(f"{label} failed: {error}") from error
+    if result.returncode != 0:
+        raise AnalysisError(
+            f"{exit_label or label} failed with exit code {result.returncode}: "
+            f"{(result.stderr or '').strip()[-500:]}"
+        )
+    return result
 
 
 def _offline_environment() -> dict[str, str]:
@@ -183,7 +231,7 @@ class WatchVideoExtractor:
         script_path: Path,
         output_root: Path,
         python_executable: str = sys.executable,
-        runner: Runner = subprocess.run,
+        runner: Runner = run_process_tree,
         timeout: float = 300,
     ) -> None:
         self.script_path = Path(script_path).resolve()
@@ -218,25 +266,9 @@ class WatchVideoExtractor:
         return VideoEvidence(frames=frames, metadata={"backend": "watch"})
 
     def _run(self, arguments: list[str]) -> None:
-        try:
-            result = self.runner(
-                arguments,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=self.timeout,
-                check=False,
-                env=_offline_environment(),
-                creationflags=HIDDEN_PROCESS_CREATION_FLAGS,
-            )
-        except (OSError, subprocess.TimeoutExpired) as error:
-            raise AnalysisError(f"watch-skill failed: {error}") from error
-        if result.returncode != 0:
-            raise AnalysisError(
-                f"watch-skill failed with exit code {result.returncode}: "
-                f"{result.stderr.strip()}"
-            )
+        _run_tool(
+            self.runner, arguments, self.timeout, label="watch-skill"
+        )
 
 
 class McpVideoExtractor:
@@ -247,7 +279,7 @@ class McpVideoExtractor:
         package_json_path: Path,
         expected_version: str,
         output_root: Path,
-        runner: Runner = subprocess.run,
+        runner: Runner = run_process_tree,
         timeout: float = 300,
     ) -> None:
         if not SEMANTIC_VERSION.fullmatch(expected_version):
@@ -293,25 +325,9 @@ class McpVideoExtractor:
             "--out",
             str(output_directory),
         ]
-        try:
-            result = self.runner(
-                arguments,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=self.timeout,
-                check=False,
-                env=_offline_environment(),
-                creationflags=HIDDEN_PROCESS_CREATION_FLAGS,
-            )
-        except (OSError, subprocess.TimeoutExpired) as error:
-            raise AnalysisError(f"mcp-video-analyzer failed: {error}") from error
-        if result.returncode != 0:
-            raise AnalysisError(
-                f"mcp-video-analyzer failed with exit code {result.returncode}: "
-                f"{result.stderr.strip()}"
-            )
+        result = _run_tool(
+            self.runner, arguments, self.timeout, label="mcp-video-analyzer"
+        )
         try:
             payload = json.loads(result.stdout)
         except json.JSONDecodeError as error:
@@ -348,7 +364,7 @@ class FfmpegImagePreparer:
         *,
         output_root: Path,
         ffmpeg_executable: str = "ffmpeg",
-        runner: Runner = subprocess.run,
+        runner: Runner = run_process_tree,
         timeout: float = 60,
     ) -> None:
         self.output_root = Path(output_root).resolve()
@@ -384,25 +400,9 @@ class FfmpegImagePreparer:
             "3",
             str(preview),
         ]
-        try:
-            result = self.runner(
-                arguments,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=self.timeout,
-                check=False,
-                env=_offline_environment(),
-                creationflags=HIDDEN_PROCESS_CREATION_FLAGS,
-            )
-        except (OSError, subprocess.TimeoutExpired) as error:
-            raise AnalysisError(f"ffmpeg preview failed: {error}") from error
-        if result.returncode != 0:
-            raise AnalysisError(
-                f"ffmpeg preview failed with exit code {result.returncode}: "
-                f"{result.stderr.strip()}"
-            )
+        result = _run_tool(
+            self.runner, arguments, self.timeout, label="ffmpeg preview"
+        )
         if not preview.is_file() or preview.stat().st_size == 0:
             raise AnalysisError("ffmpeg preview produced no image")
         return preview
@@ -423,7 +423,7 @@ class LocalAnalyzer:
         video_extractor: VideoExtractor | None = None,
         image_preparer: ImagePreparer | None = None,
         ollama_executable: str = "ollama",
-        runner: Runner = subprocess.run,
+        runner: Runner = run_process_tree,
         timeout: float = 300,
     ) -> None:
         self.model = model
@@ -462,24 +462,43 @@ class LocalAnalyzer:
     ) -> Analysis:
         if not analyses:
             raise AnalysisError("At least one segment analysis is required")
+        prompt = self._summary_prompt(analyses)
+        if len(prompt) <= MAX_PROMPT_CHARACTERS or len(analyses) == 1:
+            return self._invoke((), prompt[:MAX_PROMPT_CHARACTERS])
+        # The prompt travels on the ollama command line (Windows caps it at
+        # 32,767 characters), so summarize long videos hierarchically.
+        groups: list[list[Analysis]] = [[]]
+        for analysis in analyses:
+            candidate = [*groups[-1], analysis]
+            if groups[-1] and len(self._summary_prompt(candidate)) > MAX_PROMPT_CHARACTERS:
+                groups.append([analysis])
+            else:
+                groups[-1] = candidate
+        if len(groups) == 1:
+            middle = len(analyses) // 2
+            groups = [list(analyses[:middle]), list(analyses[middle:])]
+        partials = [self.summarize_segments(group) for group in groups]
+        return self.summarize_segments(partials)
+
+    @staticmethod
+    def _summary_prompt(analyses: Sequence[Analysis]) -> str:
         segment_payload = json.dumps(
             [
                 {
                     "segment": index + 1,
-                    "description": analysis.description,
-                    "highlights": analysis.highlights,
-                    "keywords": analysis.keywords,
+                    "description": analysis.description[:1200],
+                    "highlights": analysis.highlights[:8],
+                    "keywords": analysis.keywords[:12],
                 }
                 for index, analysis in enumerate(analyses)
             ],
             ensure_ascii=False,
         )
-        prompt = (
+        return (
             "請只根據以下片段文字分析，彙整整支影片。只輸出單一 JSON 物件，"
             "欄位固定為 description、highlights、keywords，使用繁體中文且不得"
             f"空白。不得加入片段中沒有的內容。片段資料：{segment_payload}"
         )
-        return self._invoke((), prompt)
 
     def _analyze_visuals(
         self, visual_paths: Sequence[Path], *, ocr_text: str
@@ -498,7 +517,7 @@ class LocalAnalyzer:
             "關鍵字。不要加入 Markdown 或額外欄位。"
         )
         if ocr_text:
-            prompt += " 已擷取 OCR 文字：" + ocr_text
+            prompt += " 已擷取 OCR 文字：" + ocr_text[:MAX_OCR_CHARACTERS]
         return self._invoke(prepared_paths, prompt)
 
     def _invoke(
@@ -516,25 +535,9 @@ class LocalAnalyzer:
             *(str(path) for path in visual_paths),
             prompt,
         ]
-        try:
-            result = self.runner(
-                arguments,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=self.timeout,
-                check=False,
-                env=_offline_environment(),
-                creationflags=HIDDEN_PROCESS_CREATION_FLAGS,
-            )
-        except (OSError, subprocess.TimeoutExpired) as error:
-            raise AnalysisError(f"Ollama analysis failed: {error}") from error
-        if result.returncode != 0:
-            raise AnalysisError(
-                f"Ollama failed with exit code {result.returncode}: "
-                f"{result.stderr.strip()}"
-            )
+        result = _run_tool(
+            self.runner, arguments, self.timeout, label="Ollama analysis", exit_label="Ollama"
+        )
         return self._parse_analysis(result.stdout)
 
     @staticmethod
