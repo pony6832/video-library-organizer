@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import subprocess
 import sys
+import tempfile
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -56,17 +57,50 @@ def _spawn_process(arguments: list[str]) -> WorkerProcess:
     )
 
 
+class _FileBackedProcess:
+    """Popen whose output goes to a temporary file instead of a pipe.
+
+    The UI only reads the catalog output after exit; with a pipe, output
+    larger than the OS buffer would block the child forever.
+    """
+
+    def __init__(self, arguments: list[str]) -> None:
+        self._output = tempfile.TemporaryFile(mode="w+b")
+        try:
+            self._process = subprocess.Popen(
+                arguments,
+                stdin=subprocess.DEVNULL,
+                stdout=self._output,
+                stderr=subprocess.STDOUT,
+                creationflags=HIDDEN_PROCESS_CREATION_FLAGS,
+            )
+        except BaseException:
+            self._output.close()
+            raise
+        self.pid = getattr(self._process, "pid", None)
+
+    def poll(self) -> int | None:
+        return self._process.poll()
+
+    def terminate(self) -> None:
+        if self._process.poll() is None:
+            self._process.terminate()
+
+    def wait(self, timeout: float | None = None) -> int:
+        return self._process.wait(timeout=timeout)
+
+    def communicate(self) -> tuple[str, None]:
+        self._process.wait()
+        try:
+            self._output.seek(0)
+            data = self._output.read()
+        finally:
+            self._output.close()
+        return data.decode("utf-8", errors="backslashreplace"), None
+
+
 def _spawn_catalog_process(arguments: list[str]) -> WorkerProcess:
-    return subprocess.Popen(
-        arguments,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        text=True,
-        encoding="utf-8",
-        errors="backslashreplace",
-        creationflags=HIDDEN_PROCESS_CREATION_FLAGS,
-    )
+    return _FileBackedProcess(arguments)
 
 
 def _sanitize_process_message(value: str) -> str:

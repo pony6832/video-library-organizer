@@ -82,34 +82,61 @@ class RunStateStore:
         force_generation: int = 0,
         force_prepared: bool = True,
     ) -> AnalysisRun:
-        timestamp = _now()
         with self._connect() as connection:
-            connection.execute(
-                """
-                INSERT INTO analysis_runs (
-                    run_id, root_path, status, video_count, image_count,
-                    total_bytes, total_media, analysis_mode,
-                    force_generation, force_prepared, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    run_id,
-                    str(Path(root_path).resolve()),
-                    status,
-                    video_count,
-                    image_count,
-                    total_bytes,
-                    video_count + image_count,
-                    analysis_mode.value,
-                    force_generation,
-                    int(force_prepared),
-                    timestamp,
-                    timestamp,
-                ),
+            self._insert_run(
+                connection,
+                run_id,
+                root_path=root_path,
+                video_count=video_count,
+                image_count=image_count,
+                total_bytes=total_bytes,
+                status=status,
+                analysis_mode=analysis_mode,
+                force_generation=force_generation,
+                force_prepared=force_prepared,
             )
         result = self.get_run(run_id)
         assert result is not None
         return result
+
+    @staticmethod
+    def _insert_run(
+        connection: sqlite3.Connection,
+        run_id: str,
+        *,
+        root_path: Path,
+        video_count: int,
+        image_count: int,
+        total_bytes: int,
+        status: str,
+        analysis_mode: AnalysisMode,
+        force_generation: int,
+        force_prepared: bool,
+    ) -> None:
+        timestamp = _now()
+        connection.execute(
+            """
+            INSERT INTO analysis_runs (
+                run_id, root_path, status, video_count, image_count,
+                total_bytes, total_media, analysis_mode,
+                force_generation, force_prepared, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                run_id,
+                str(Path(root_path).resolve()),
+                status,
+                video_count,
+                image_count,
+                total_bytes,
+                video_count + image_count,
+                analysis_mode.value,
+                force_generation,
+                int(force_prepared),
+                timestamp,
+                timestamp,
+            ),
+        )
 
     @staticmethod
     def run_id_for_root(root_path: Path) -> str:
@@ -213,20 +240,27 @@ class RunStateStore:
                 """,
                 (normalized_root, AnalysisMode.FORCE_GEMINI.value),
             ).fetchone()
-        generation = int(generation_row[0]) + 1
-        root_digest = hashlib.sha256(
-            normalized_root.casefold().encode("utf-8")
-        ).hexdigest()[:20]
-        run = self.create_run(
-            f"force-{root_digest}-{generation:04d}",
-            root_path=root_path,
-            video_count=video_count,
-            image_count=image_count,
-            total_bytes=total_bytes,
-            analysis_mode=AnalysisMode.FORCE_GEMINI,
-            force_generation=generation,
-            force_prepared=False,
-        )
+            generation = int(generation_row[0]) + 1
+            root_digest = hashlib.sha256(
+                normalized_root.casefold().encode("utf-8")
+            ).hexdigest()[:20]
+            run_id = f"force-{root_digest}-{generation:04d}"
+            # Insert inside the same IMMEDIATE transaction; two UI instances
+            # could otherwise both pick the same generation number.
+            self._insert_run(
+                connection,
+                run_id,
+                root_path=root_path,
+                video_count=video_count,
+                image_count=image_count,
+                total_bytes=total_bytes,
+                status="pending",
+                analysis_mode=AnalysisMode.FORCE_GEMINI,
+                force_generation=generation,
+                force_prepared=False,
+            )
+        run = self.get_run(run_id)
+        assert run is not None
         return run, True
 
     def mark_force_prepared(self, run_id: str) -> None:
@@ -492,6 +526,23 @@ class RunStateStore:
                 ),
             )
         self._require_updated(cursor.rowcount, segment_id)
+
+    def adopt_segments(self, run_id: str, video_id: str) -> int:
+        """Move a video's segments to the run that resumes it.
+
+        Crash recovery and force targets are scoped by run, so segments left
+        behind by an older run were never requeued after a crash.
+        """
+        with self._connect() as connection:
+            cursor = connection.execute(
+                """
+                UPDATE video_segments
+                SET run_id = ?, updated_at = ?
+                WHERE video_id = ? AND run_id != ?
+                """,
+                (run_id, _now(), video_id, run_id),
+            )
+        return cursor.rowcount
 
     def requeue_stale_processing(self, run_id: str) -> int:
         with self._connect() as connection:

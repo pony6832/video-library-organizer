@@ -71,6 +71,7 @@ class SegmentPipeline:
         force_gemini = mode is AnalysisMode.FORCE_GEMINI
         segments = self.store.list_segments(record.id)
         if segments:
+            self.store.adopt_segments(run_id, record.id)
             self.store.requeue_stale_processing(run_id)
             segments = self.store.list_segments(record.id)
         else:

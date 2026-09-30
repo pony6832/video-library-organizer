@@ -510,3 +510,63 @@ def test_run_process_tree_times_out_and_returns_output() -> None:
     with pytest.raises(subprocess.TimeoutExpired):
         run_process_tree([sys.executable, "-c", "import time; time.sleep(60)"], capture_output=True, timeout=1)
     assert time.monotonic() - started < 30
+
+
+# --- run state ------------------------------------------------------------
+
+def test_resumed_video_adopts_segments_for_crash_recovery(tmp_path: Path) -> None:
+    from media_catalog.run_state import VideoSegment
+
+    store = RunStateStore(tmp_path / "catalog.sqlite")
+    old = store.create_run("old", root_path=tmp_path, video_count=1, image_count=0, total_bytes=1)
+    new = store.create_run("new", root_path=tmp_path, video_count=1, image_count=0, total_bytes=1)
+    segment = VideoSegment(
+        segment_id="v:0", run_id=old.run_id, video_id="v",
+        segment_index=0, start_seconds=0, end_seconds=5,
+    )
+    store.upsert_segments(old.run_id, "v", (segment,))
+    store.mark_segment_status("v:0", "processing")
+
+    assert store.requeue_stale_processing(new.run_id) == 0
+    store.adopt_segments(new.run_id, "v")
+    assert store.requeue_stale_processing(new.run_id) == 1
+
+
+def test_catalog_process_output_does_not_block_on_pipe_buffer() -> None:
+    import sys
+    import time
+
+    from media_catalog.supervisor import _spawn_catalog_process
+
+    process = _spawn_catalog_process(
+        [sys.executable, "-c", "import sys; sys.stdout.write('x' * 2_000_000)"]
+    )
+    deadline = time.monotonic() + 30
+    while process.poll() is None and time.monotonic() < deadline:
+        time.sleep(0.05)
+
+    assert process.poll() == 0, "child hung writing more than a pipe buffer"
+    output, _ = process.communicate()
+    assert len(output) == 2_000_000
+
+
+def test_force_runs_get_distinct_generations(tmp_path: Path) -> None:
+    from media_catalog.analysis_mode import AnalysisMode
+
+    store = RunStateStore(tmp_path / "catalog.sqlite")
+    first, created = store.begin_run(
+        root_path=tmp_path, video_count=1, image_count=0, total_bytes=1,
+        mode=AnalysisMode.FORCE_GEMINI,
+    )
+    assert created
+    store.update_counts(
+        first.run_id, completed_media=1, failed_media=0,
+        current_media_id=None, current_segment_id=None, status="completed",
+    )
+    second, created = store.begin_run(
+        root_path=tmp_path, video_count=1, image_count=0, total_bytes=1,
+        mode=AnalysisMode.FORCE_GEMINI,
+    )
+
+    assert created
+    assert second.force_generation == first.force_generation + 1
