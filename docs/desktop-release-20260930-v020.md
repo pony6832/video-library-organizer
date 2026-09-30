@@ -31,3 +31,17 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-desktop.ps1 -B
 ```
 
 安裝包為輕量版，不含模型、媒體或使用者 Key。首次環境下載仍需網路；尚未在另一台完全乾淨的 Windows 實機驗證全部下載流程，EXE 未數位簽章。
+
+## 最終安裝包與驗收
+
+建置來源 commit：`dc78326`。輸出：`dist/20260930-v020/MediaCatalogVideoDesktop-Setup.exe`，15,482,115 bytes。
+
+SHA256：`41091B0FAB9E7F6AE42136FD8357E9298774C950F9B57A29B5DB07AC0B207003`。
+
+Expanded frozen archive audit 通過，findings 為空；1008 個 manifest 項目的大小與 SHA256 均核對一致。
+
+真實隔離安裝、本機影片分析、QA 解除安裝全部通過。Excel 包含 1 支影片、12 欄與有效來源超連結，未收錄照片；原始影片／照片雜湊前後一致，解除安裝保留來源、整理成果及既有本機工具。收據位於 `build/desktop-acceptance/v020-20260930/acceptance.json`。
+
+實際分析後 Ollama 回報 `qwen3.5:9b`、100% GPU、4096 context、載入大小約 5.5 GB。此數字僅代表本次小型驗收的運行配置；較多縮圖或長上下文的顯存需求可能較高。
+
+原生 Tk 版面所需高度已驗證可容納於最小視窗高度，避免新增進度列擠壓底部按鈕。306 項測試通過，2 項略過。
