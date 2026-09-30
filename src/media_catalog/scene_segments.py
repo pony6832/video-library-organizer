@@ -10,7 +10,7 @@ from pathlib import Path
 
 from PIL import Image
 
-from .process_utils import HIDDEN_PROCESS_CREATION_FLAGS
+from .process_utils import HIDDEN_PROCESS_CREATION_FLAGS, credential_free_environment
 
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
@@ -209,6 +209,7 @@ class SceneSegmenter:
                 timeout=self.timeout_seconds,
                 check=False,
                 creationflags=HIDDEN_PROCESS_CREATION_FLAGS,
+                env=credential_free_environment(),
             )
         except (OSError, subprocess.TimeoutExpired) as error:
             raise SceneSegmentationError(

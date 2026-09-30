@@ -292,7 +292,7 @@ def test_cli_does_not_repeat_excel_write_after_batch_sync(
     def duplicate_write(*_args, **_kwargs):
         raise PermissionError("duplicate final Excel write")
 
-    monkeypatch.setattr(cli_module, "write_excel", duplicate_write)
+    monkeypatch.setattr(cli_module, "try_write_excel", duplicate_write)
 
     exit_code = main(
         ["analyze-all", str(root), "--skill-root", str(tmp_path)],

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import sqlite3
 import os
 import sys
 from dataclasses import dataclass
@@ -118,6 +119,8 @@ class StatusViewModel:
             status_text = "心跳逾時"
         elif supervisor_status == "completed" or run.status == "completed":
             status_text = "已完成"
+        elif supervisor_status == "incomplete":
+            status_text = "已結束，仍有未完成項目（請看 Excel 錯誤原因）"
         else:
             status_text = "worker 未執行"
         if (
@@ -520,8 +523,11 @@ class StatusApplication:
             if self.closing and not snapshot.worker_alive:
                 self.root.destroy()
                 return
-        except (OSError, RuntimeError) as error:
+        except (OSError, RuntimeError, sqlite3.Error) as error:
             self.status_var.set(f"狀態讀取失敗：{error}")
+            self.light.itemconfigure(self.light_dot, fill="#EF4444")
+        except Exception as error:  # never let one bad poll stop the refresh loop
+            self.status_var.set(f"狀態讀取失敗：{type(error).__name__}")
             self.light.itemconfigure(self.light_dot, fill="#EF4444")
         self.root.after(1000, self._refresh)
 
@@ -540,31 +546,21 @@ class StatusApplication:
                 "stopped": "已安全停止",
                 "error": snapshot.error_text or "建立媒體清冊失敗",
             }.get(snapshot.status, "worker 未執行")
-            records = []
+            video_count = image_count = total_bytes = 0
             if (
                 snapshot.status == "catalog_ready"
                 and self.workspace is not None
                 and self.workspace.database_path.is_file()
             ):
-                records = CatalogDatabase(
+                video_count, image_count, total_bytes = CatalogDatabase(
                     self.workspace.database_path
-                ).list_records()
+                ).media_summary()
             return StatusViewModel.without_run(
                 status_text=status_text,
                 root_text=root_text,
-                video_count=sum(
-                    record.media_type.startswith("video/")
-                    for record in records
-                ),
-                image_count=sum(
-                    record.media_type.startswith("image/")
-                    for record in records
-                ),
-                total_bytes=sum(
-                    record.path.stat().st_size
-                    for record in records
-                    if record.path.is_file()
-                ),
+                video_count=video_count,
+                image_count=image_count,
+                total_bytes=total_bytes,
             )
         media_name = ""
         segment_number = 0

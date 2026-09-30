@@ -14,13 +14,45 @@ class WorkspacePathError(ValueError):
     pass
 
 
+# Reparse tags with the name-surrogate bit redirect to another location
+# (symlinks, junctions, mount points). Cloud placeholders such as OneDrive
+# Files-On-Demand are reparse points too, but they are ordinary local files
+# and folders from the user's point of view, so they must not be skipped.
+_REPARSE_TAG_NAME_SURROGATE = 0x20000000
+# Online-only cloud files: reading them triggers a download.
+_FILE_ATTRIBUTE_RECALL_ON_OPEN = 0x00040000
+_FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS = 0x00400000
+
+
+def is_link_stat(path_stat: os.stat_result) -> bool:
+    attributes = getattr(path_stat, "st_file_attributes", 0)
+    if not attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT:
+        return False
+    tag = getattr(path_stat, "st_reparse_tag", None)
+    if tag is None:
+        return True
+    return bool(tag & _REPARSE_TAG_NAME_SURROGATE)
+
+
+def is_online_only_stat(path_stat: os.stat_result) -> bool:
+    attributes = getattr(path_stat, "st_file_attributes", 0)
+    return bool(
+        attributes
+        & (
+            _FILE_ATTRIBUTE_RECALL_ON_OPEN
+            | _FILE_ATTRIBUTE_RECALL_ON_DATA_ACCESS
+            | getattr(stat, "FILE_ATTRIBUTE_OFFLINE", 0x1000)
+        )
+    )
+
+
 def is_reparse_point(path: Path) -> bool:
+    """True for symlinks, junctions and mount points (not cloud placeholders)."""
     try:
         path_stat = os.lstat(path)
     except OSError:
         return False
-    attributes = getattr(path_stat, "st_file_attributes", 0)
-    return bool(attributes & stat.FILE_ATTRIBUTE_REPARSE_POINT)
+    return is_link_stat(path_stat)
 
 
 @dataclass(frozen=True, slots=True)

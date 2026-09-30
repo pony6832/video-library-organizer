@@ -12,6 +12,9 @@ class Status(StrEnum):
     COMPLETED = "completed"
     SKIPPED = "skipped"
     FAILED = "failed"
+    # The source was deleted, moved, or replaced by a newer version. Kept so
+    # its analysis is not lost, but excluded from queues, counts and Excel.
+    MISSING = "missing"
 
 
 @dataclass(frozen=True, slots=True)

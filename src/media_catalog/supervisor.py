@@ -17,6 +17,12 @@ from .run_state import AnalysisRun, RunStateStore
 from .workspace import MediaWorkspace, WorkspacePathError
 
 
+# ``media-catalog analyze-all`` exits with 3 when it finished normally but some
+# media still failed or Excel could not be refreshed. That is a result, not a
+# crash, so it must not trigger an automatic restart.
+INCOMPLETE_EXIT_CODE = 3
+
+
 class WorkerProcess(Protocol):
     def poll(self) -> int | None: ...
 
@@ -173,20 +179,14 @@ class WorkerSupervisor:
                 f"找不到既有媒體清冊，請先建立清冊：{workspace.result_root}"
             )
         store = self.store_factory(workspace)
-        records = [r for r in CatalogDatabase(workspace.database_path).list_records() if not video_only or r.media_type.startswith("video/")]
+        video_count, image_count, total_bytes = CatalogDatabase(
+            workspace.database_path
+        ).media_summary(video_only=video_only)
         run, _ = store.begin_run(
             root_path=workspace.root,
-            video_count=sum(
-                record.media_type.startswith("video/") for record in records
-            ),
-            image_count=sum(
-                record.media_type.startswith("image/") for record in records
-            ),
-            total_bytes=sum(
-                record.path.stat().st_size
-                for record in records
-                if record.path.is_file()
-            ),
+            video_count=video_count,
+            image_count=image_count,
+            total_bytes=total_bytes,
             mode=mode,
         )
         store.clear_stop(run.run_id)
@@ -262,6 +262,8 @@ class WorkerSupervisor:
                 return SupervisorSnapshot("stopped", False, run, exit_code)
             if exit_code == 0 and run.completed_media == run.total_media:
                 return SupervisorSnapshot("completed", False, run, exit_code)
+            if exit_code in (0, INCOMPLETE_EXIT_CODE):
+                return SupervisorSnapshot("incomplete", False, run, exit_code)
             if not self._restart_used:
                 self._restart_worker()
                 return SupervisorSnapshot("restarting", True, self._require_run())

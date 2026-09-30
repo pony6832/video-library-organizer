@@ -6,7 +6,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
-from .process_utils import HIDDEN_PROCESS_CREATION_FLAGS
+from .process_utils import HIDDEN_PROCESS_CREATION_FLAGS, credential_free_environment
 from .mcp_installation import mcp_ready, prepare_mcp_install
 from .local_models import DEFAULT_LOCAL_MODEL
 
@@ -57,7 +57,9 @@ def run_external(args, *, timeout=120):
     try:
         return subprocess.run(args, stdin=subprocess.DEVNULL, capture_output=True,
             text=True, encoding='utf-8', errors='replace', timeout=timeout,
-            creationflags=HIDDEN_PROCESS_CREATION_FLAGS)
+            creationflags=HIDDEN_PROCESS_CREATION_FLAGS,
+            # Installers and npm lifecycle scripts must not see the Gemini key.
+            env=credential_free_environment())
     finally:
         if sys.platform == 'win32' and getattr(sys, 'frozen', False):
             ctypes.windll.kernel32.SetDllDirectoryW(sys._MEIPASS)

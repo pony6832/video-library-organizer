@@ -11,7 +11,7 @@ from media_catalog.inference import Analysis
 from media_catalog.workspace import MediaWorkspace
 
 
-def test_catalog_writes_visible_excel_every_100_videos(tmp_path, monkeypatch):
+def test_catalog_writes_visible_excel_at_first_100_then_throttles(tmp_path, monkeypatch):
     from media_catalog import bootstrap
 
     for number in range(205):
@@ -25,7 +25,9 @@ def test_catalog_writes_visible_excel_every_100_videos(tmp_path, monkeypatch):
 
     monkeypatch.setattr(bootstrap, 'write_excel', capture)
     result = bootstrap_workspace(tmp_path, video_only=True)
-    assert rows_at_write == [100, 200, 205]
+    # Later 100-item checkpoints are throttled to one per minute, so a fast
+    # scan does not rewrite the whole workbook quadratically.
+    assert rows_at_write == [100, 205]
     book = load_workbook(result.workspace.excel_path, read_only=True)
     try:
         assert sum(1 for _ in book.active.iter_rows(values_only=True)) == 206

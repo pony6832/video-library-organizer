@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
-from typing import Iterable
+import time
+from typing import Callable, Iterable
 import uuid
 from zipfile import BadZipFile
 from xml.etree.ElementTree import ParseError
@@ -39,6 +40,7 @@ _STATUS_LABELS = {
     Status.COMPLETED: "完成",
     Status.SKIPPED: "略過",
     Status.FAILED: "失敗",
+    Status.MISSING: "來源已移除",
 }
 
 _MEDIA_LABELS = {
@@ -51,6 +53,14 @@ _MEDIA_LABELS = {
     "video/x-matroska": "影片 (MKV)",
     "video/webm": "影片 (WebM)",
 }
+
+
+# Excel supports roughly 66,530 hyperlinks per worksheet; past that it asks to
+# repair the workbook. Stay well below the limit and leave the path as text.
+MAX_HYPERLINKS = 60_000
+
+# Leftover temporary workbooks from a killed writer are swept after this age.
+_STALE_TEMPORARY_SECONDS = 3600
 
 
 class ReviewedPathsError(RuntimeError):
@@ -151,8 +161,12 @@ def write_excel(records: Iterable[MediaRecord], output_path: Path) -> Path:
     sheet.append(header)
 
     row_count = 0
+    hyperlink_count = 0
     for record in records:
-        source_path = record.path.resolve()
+        # Catalog paths are stored resolved; avoid a resolve() syscall per row.
+        source_path = (
+            record.path if record.path.is_absolute() else record.path.resolve()
+        )
         path_text = str(source_path)
         values = (
                 (
@@ -184,9 +198,10 @@ def write_excel(records: Iterable[MediaRecord], output_path: Path) -> Path:
                 cell.data_type = "s"
             row.append(cell)
         path_cell = row[2]
-        if source_path.is_file():
+        if hyperlink_count < MAX_HYPERLINKS and source_path.is_file():
             path_cell.hyperlink = source_path.as_uri()
             path_cell.style = "Hyperlink"
+            hyperlink_count += 1
         sheet.append(row)
         row_count += 1
 
@@ -204,6 +219,7 @@ def write_excel(records: Iterable[MediaRecord], output_path: Path) -> Path:
         review_validation.add(f"A2:A{row_count + 1}")
 
     sheet.auto_filter.ref = f"A1:L{row_count + 1}"
+    _sweep_stale_temporaries(destination)
     temporary = destination.with_name(
         f".{destination.stem}.{uuid.uuid4().hex}.tmp{destination.suffix}"
     )
@@ -219,3 +235,66 @@ def write_excel(records: Iterable[MediaRecord], output_path: Path) -> Path:
             except OSError:
                 pass
     return destination
+
+
+def _sweep_stale_temporaries(destination: Path) -> None:
+    cutoff = time.time() - _STALE_TEMPORARY_SECONDS
+    pattern = f".{destination.stem}.*.tmp{destination.suffix}"
+    for leftover in destination.parent.glob(pattern):
+        try:
+            if leftover.stat().st_mtime < cutoff:
+                leftover.unlink()
+        except OSError:
+            pass
+
+
+def try_write_excel(
+    records: Iterable[MediaRecord],
+    output_path: Path,
+    *,
+    writer: Callable[[Iterable[MediaRecord], Path], Path] = write_excel,
+) -> bool:
+    """Write the catalog, returning False when Excel holds the file open.
+
+    SQLite stays the source of truth, so a locked workbook only delays the
+    refresh; the next successful write rebuilds it completely.
+    """
+    try:
+        writer(records, output_path)
+    except PermissionError:
+        if not Path(output_path).exists():
+            raise
+        return False
+    return True
+
+
+class ExcelCheckpoint:
+    """Refresh Excel every ``every_items`` items, but not more often than
+    ``min_interval_seconds``; rewriting a large catalog every 100 items makes
+    the total cost quadratic."""
+
+    def __init__(
+        self,
+        write: Callable[[], object],
+        *,
+        every_items: int = 100,
+        min_interval_seconds: float = 60.0,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._write = write
+        self._every_items = max(1, every_items)
+        self._min_interval_seconds = max(0.0, min_interval_seconds)
+        self._clock = clock
+        self._last_write: float | None = None
+
+    def __call__(self, count: int) -> None:
+        if count % self._every_items:
+            return
+        now = self._clock()
+        if (
+            self._last_write is not None
+            and now - self._last_write < self._min_interval_seconds
+        ):
+            return
+        self._write()
+        self._last_write = self._clock()

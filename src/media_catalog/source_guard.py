@@ -7,15 +7,10 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .models import MediaRecord
+from .process_utils import CREDENTIAL_ENVIRONMENT_KEYS
 
 
-_SECRET_KEYS = (
-    "OPENAI_API_KEY",
-    "GROQ_API_KEY",
-    "GEMINI_API_KEY",
-    "ANTHROPIC_API_KEY",
-    "TWELVELABS_API_KEY",
-)
+_SECRET_KEYS = CREDENTIAL_ENVIRONMENT_KEYS
 
 
 class SourceIntegrityError(RuntimeError):
@@ -30,7 +25,7 @@ class SourceSnapshot:
     sha256: str
 
 
-def _sha256(path: Path, chunk_size: int = 1024 * 1024) -> str:
+def sha256_file(path: Path, chunk_size: int = 1024 * 1024) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as source:
         while chunk := source.read(chunk_size):
@@ -47,7 +42,7 @@ def capture_source(path: Path) -> SourceSnapshot:
         path=resolved,
         size=stat_result.st_size,
         mtime_ns=stat_result.st_mtime_ns,
-        sha256=_sha256(resolved),
+        sha256=sha256_file(resolved),
     )
 
 

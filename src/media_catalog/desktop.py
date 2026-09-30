@@ -274,16 +274,16 @@ class DesktopApplication(StatusApplication):
             model = replace(model, status_text='安全停止中，正在保存目前進度…')
         if snapshot.run is None and snapshot.status == 'cataloging' and self.workspace and self.workspace.database_path.is_file():
             from .database import CatalogDatabase
-            records = [r for r in CatalogDatabase(self.workspace.database_path).list_records() if r.media_type.startswith('video/')]
+            videos, _, total_bytes = CatalogDatabase(self.workspace.database_path).media_summary(video_only=True)
             model = StatusViewModel.without_run(status_text=model.status_text, root_text=model.root_text,
-                video_count=len(records), total_bytes=sum(r.path.stat().st_size for r in records if r.path.is_file()))
-            model = replace(model, progress_text=f'清冊已寫入 {len(records)} 部影片；正在掃描其餘檔案')
+                video_count=videos, total_bytes=total_bytes)
+            model = replace(model, progress_text=f'清冊已寫入 {videos} 部影片；正在掃描其餘檔案')
         if snapshot.run is None and snapshot.status == 'catalog_ready' and self.workspace:
             from .database import CatalogDatabase
-            records = [r for r in CatalogDatabase(self.workspace.database_path).list_records() if r.media_type.startswith('video/')]
+            videos, _, total_bytes = CatalogDatabase(self.workspace.database_path).media_summary(video_only=True)
             model = StatusViewModel.without_run(status_text=model.status_text, root_text=model.root_text,
-                video_count=len(records), total_bytes=sum(r.path.stat().st_size for r in records if r.path.is_file()))
-            model = replace(model, progress_text=f'清冊已收錄 {len(records)} 部影片；尚未開始本次分析',
+                video_count=videos, total_bytes=total_bytes)
+            model = replace(model, progress_text=f'清冊已收錄 {videos} 部影片；尚未開始本次分析',
                 remaining_text='啟動分析後計算')
         self.cloud_var.set(cloud_status(snapshot.run))
         return model
@@ -352,7 +352,8 @@ class DesktopApplication(StatusApplication):
                 kind, message = self.events.get_nowait()
                 if kind == 'key_check':
                     self.key_status_var.set(message)
-                    self.check_key_button.configure(state='normal')
+                    # Respect busy state instead of unconditionally re-enabling.
+                    self._apply_control_state()
                     continue
                 self.setup_text.set(message)
                 if kind == 'done':

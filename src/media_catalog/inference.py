@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import Callable, Protocol, Sequence
 from urllib.parse import urlparse
 
-from .process_utils import HIDDEN_PROCESS_CREATION_FLAGS
+from .process_utils import HIDDEN_PROCESS_CREATION_FLAGS, credential_free_environment
 
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
@@ -161,16 +161,8 @@ def _output_directory(output_root: Path, source: Path, backend: str) -> Path:
 
 
 def _offline_environment() -> dict[str, str]:
-    environment = dict(os.environ)
-    for key in (
-        "OPENAI_API_KEY",
-        "GROQ_API_KEY",
-        "GEMINI_API_KEY",
-        "ANTHROPIC_API_KEY",
-        "TWELVELABS_API_KEY",
-        "MCP_WRITE_SIDECARS",
-    ):
-        environment.pop(key, None)
+    environment = credential_free_environment()
+    environment.pop("MCP_WRITE_SIDECARS", None)
     environment.update(
         {
             "npm_config_offline": "true",

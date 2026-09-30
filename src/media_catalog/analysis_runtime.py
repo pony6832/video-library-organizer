@@ -16,7 +16,7 @@ from .inference import (
     Runner,
     WatchVideoExtractor,
 )
-from .process_utils import HIDDEN_PROCESS_CREATION_FLAGS
+from .process_utils import HIDDEN_PROCESS_CREATION_FLAGS, credential_free_environment
 from .mcp_installation import MCP_VIDEO_ANALYZER_VERSION, mcp_ready
 from .run_state import RunStateStore
 from .scene_segments import SceneSegmenter
@@ -60,6 +60,7 @@ def _preflight(
             timeout=30,
             check=False,
             creationflags=HIDDEN_PROCESS_CREATION_FLAGS,
+            env=credential_free_environment(),
         )
     except (OSError, subprocess.TimeoutExpired) as error:
         raise RuntimePreflightError(

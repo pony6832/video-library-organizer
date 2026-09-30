@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .analysis_mode import AnalysisMode
+from .sqlite_utils import connect as sqlite_connect
 from .schema_migration import ensure_a_plus_schema
 
 
@@ -66,9 +67,7 @@ class RunStateStore:
         ensure_a_plus_schema(self.path, excel_path)
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.path, timeout=30)
-        connection.row_factory = sqlite3.Row
-        return connection
+        return sqlite_connect(self.path)
 
     def create_run(
         self,

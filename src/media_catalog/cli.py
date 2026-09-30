@@ -4,6 +4,7 @@ import argparse
 import os
 import sys
 from collections.abc import Callable, Sequence
+from contextlib import nullcontext
 from pathlib import Path
 
 from .analysis_mode import AnalysisMode
@@ -14,13 +15,15 @@ from .database import CatalogDatabase
 from .excel_catalog import (
     ReviewedPathsError,
     read_reviewed_paths_strict,
-    write_excel,
+    try_write_excel,
 )
 from .force_gemini import validate_force_environment
 from .inference import AnalysisError, LocalAnalyzer
 from .local_models import DEFAULT_LOCAL_MODEL
 from .models import Status
 from .run_lock import AnalysisAlreadyRunningError, analysis_run_lock
+from .run_state import RunStateStore
+from .stage_runner import HeartbeatThread
 from .source_guard import (
     SourceIntegrityError,
     capture_source,
@@ -117,7 +120,10 @@ def main(
             f" added={result.scan.discovered}"
             f" existing={result.scan.existing}"
             f" skipped={result.scan.unsupported}"
+            f" unreadable={result.scan.unreadable}"
+            f" retired={result.scan.retired}"
             f" total={result.total_records}"
+            f" excel_sync_pending={str(result.excel_sync_pending).lower()}"
             f" catalog={result.workspace.excel_path}"
         )
         return 0
@@ -154,32 +160,42 @@ def main(
             lock_path = workspace.result_root / ".analysis.lock"
             with analysis_run_lock(lock_path):
                 database = CatalogDatabase(workspace.database_path)
-                reviewed_paths = (
-                    read_reviewed_paths_strict(workspace.excel_path)
-                    if mode is AnalysisMode.FORCE_GEMINI
-                    else None
+                # The supervisor treats a stale heartbeat as a hung worker, so
+                # keep beating through the slow startup (preflight, requeue,
+                # Excel rebuild) before analyze_pending takes over.
+                startup_heartbeat = (
+                    HeartbeatThread(RunStateStore(workspace.database_path), arguments.run_id)
+                    if arguments.run_id
+                    else nullcontext()
                 )
-                analyzer = runtime_builder(
-                    skill_root=arguments.skill_root,
-                    workspace=workspace,
-                    model=arguments.model,
-                )
-                if mode is AnalysisMode.FORCE_GEMINI:
-                    recovered_incomplete = 0
-                    recovered_processing = 0
-                    retried_failed = 0
-                else:
-                    recovered_incomplete = (
-                        database.requeue_incomplete_analysis(video_only=arguments.video_only)
+                with startup_heartbeat:
+                    reviewed_paths = (
+                        read_reviewed_paths_strict(workspace.excel_path)
+                        if mode is AnalysisMode.FORCE_GEMINI
+                        else None
                     )
-                    recovered_processing = database.requeue_processing(video_only=arguments.video_only)
-                    retried_failed = database.requeue_failed(video_only=arguments.video_only)
-                if (
-                    recovered_incomplete
-                    or recovered_processing
-                    or retried_failed
-                ):
-                    write_excel(database.list_records(), workspace.excel_path)
+                    analyzer = runtime_builder(
+                        skill_root=arguments.skill_root,
+                        workspace=workspace,
+                        model=arguments.model,
+                    )
+                    if mode is AnalysisMode.FORCE_GEMINI:
+                        recovered_incomplete = 0
+                        recovered_processing = 0
+                        retried_failed = 0
+                    else:
+                        recovered_incomplete = (
+                            database.requeue_incomplete_analysis(video_only=arguments.video_only)
+                        )
+                        recovered_processing = database.requeue_processing(video_only=arguments.video_only)
+                        retried_failed = database.requeue_failed(video_only=arguments.video_only)
+                    if (
+                        recovered_incomplete
+                        or recovered_processing
+                        or retried_failed
+                    ):
+                        # analyze_pending rebuilds Excel at the end anyway.
+                        try_write_excel(database.list_records(), workspace.excel_path)
 
                 def report_progress(
                     completed: int, total: int, record
@@ -229,7 +245,7 @@ def main(
             with analysis_run_lock(workspace.result_root / ".analysis.lock"):
                 database = CatalogDatabase(workspace.database_path)
                 count = database.requeue_processing(video_only=arguments.video_only)
-                write_excel(database.list_records(), workspace.excel_path)
+                try_write_excel(database.list_records(), workspace.excel_path)
             _print_console(f"MEDIA_ANALYSIS_RESUMED count={count}")
             return 0
 
@@ -237,7 +253,7 @@ def main(
             with analysis_run_lock(workspace.result_root / ".analysis.lock"):
                 database = CatalogDatabase(workspace.database_path)
                 count = database.requeue_failed(video_only=arguments.video_only)
-                write_excel(database.list_records(), workspace.excel_path)
+                try_write_excel(database.list_records(), workspace.excel_path)
             _print_console(f"MEDIA_ANALYSIS_RETRY_QUEUED count={count}")
             return 0
 

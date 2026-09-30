@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from .models import MediaRecord, Status, has_complete_analysis
+from .sqlite_utils import connect as sqlite_connect
 
 if TYPE_CHECKING:
     from .schema_migration import MigrationResult
@@ -25,9 +26,7 @@ class CatalogDatabase:
         self._create_schema()
 
     def _connect(self) -> sqlite3.Connection:
-        connection = sqlite3.connect(self.db_path)
-        connection.row_factory = sqlite3.Row
-        return connection
+        return sqlite_connect(self.db_path)
 
     def _create_schema(self) -> None:
         with self._connect() as connection:
@@ -51,6 +50,27 @@ class CatalogDatabase:
                 )
                 """
             )
+            columns = {
+                row["name"]
+                for row in connection.execute("PRAGMA table_info(media_records)")
+            }
+            # Size and mtime let a rescan skip re-hashing unchanged files.
+            if "source_size" not in columns:
+                connection.execute(
+                    "ALTER TABLE media_records ADD COLUMN source_size INTEGER"
+                )
+            if "source_mtime_ns" not in columns:
+                connection.execute(
+                    "ALTER TABLE media_records ADD COLUMN source_mtime_ns INTEGER"
+                )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS media_records_path_nocase "
+                "ON media_records (normalized_path COLLATE NOCASE)"
+            )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS media_records_fingerprint "
+                "ON media_records (fingerprint)"
+            )
 
     def prepare_a_plus_schema(
         self, excel_path: Path | None = None
@@ -60,41 +80,185 @@ class CatalogDatabase:
         return ensure_a_plus_schema(self.db_path, excel_path)
 
     def upsert_discovered(
-        self, path: Path, fingerprint: str, media_type: str
+        self,
+        path: Path,
+        fingerprint: str,
+        media_type: str,
+        *,
+        size: int | None = None,
+        mtime_ns: int | None = None,
     ) -> MediaRecord:
-        normalized_path = str(Path(path).resolve())
+        (record,) = self.upsert_discovered_many(
+            [(path, fingerprint, media_type, size, mtime_ns)]
+        )
+        return record
+
+    def upsert_discovered_many(
+        self,
+        entries: Sequence[tuple[Path, str, str, int | None, int | None]],
+    ) -> list[MediaRecord]:
+        """Insert or refresh scanned files in one transaction.
+
+        Paths match case-insensitively (NTFS semantics), so renaming a folder
+        from "Trip" to "trip" updates the existing row instead of duplicating
+        it. A new row whose content already has a complete analysis elsewhere
+        (a moved or copied file) reuses that analysis instead of paying again.
+        """
+        records: list[MediaRecord] = []
         with self._connect() as connection:
-            row = connection.execute(
-                """
-                SELECT * FROM media_records
-                WHERE normalized_path = ? AND fingerprint = ?
-                """,
-                (normalized_path, fingerprint),
-            ).fetchone()
-            if row is None:
-                record_id = str(uuid.uuid4())
-                timestamp = _now()
-                connection.execute(
-                    """
-                    INSERT INTO media_records (
-                        id, normalized_path, fingerprint, media_type, status,
-                        discovered_at, updated_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?)
-                    """,
-                    (
-                        record_id,
-                        normalized_path,
-                        fingerprint,
-                        media_type,
-                        Status.PENDING.value,
-                        timestamp,
-                        timestamp,
-                    ),
-                )
+            for path, fingerprint, media_type, size, mtime_ns in entries:
+                normalized_path = str(Path(path).resolve())
                 row = connection.execute(
+                    """
+                    SELECT * FROM media_records
+                    WHERE normalized_path = ? COLLATE NOCASE AND fingerprint = ?
+                    ORDER BY discovered_at, id
+                    LIMIT 1
+                    """,
+                    (normalized_path, fingerprint),
+                ).fetchone()
+                timestamp = _now()
+                if row is None:
+                    record_id = str(uuid.uuid4())
+                    connection.execute(
+                        """
+                        INSERT INTO media_records (
+                            id, normalized_path, fingerprint, media_type, status,
+                            discovered_at, updated_at, source_size, source_mtime_ns
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            record_id,
+                            normalized_path,
+                            fingerprint,
+                            media_type,
+                            Status.PENDING.value,
+                            timestamp,
+                            timestamp,
+                            size,
+                            mtime_ns,
+                        ),
+                    )
+                    self._reuse_existing_analysis(
+                        connection, record_id, fingerprint
+                    )
+                else:
+                    record_id = row["id"]
+                    status = row["status"]
+                    if status == Status.MISSING.value:
+                        status = (
+                            Status.ANALYZED.value
+                            if _row_has_analysis(row)
+                            else Status.PENDING.value
+                        )
+                    connection.execute(
+                        """
+                        UPDATE media_records
+                        SET normalized_path = ?, status = ?,
+                            source_size = ?, source_mtime_ns = ?
+                        WHERE id = ?
+                        """,
+                        (normalized_path, status, size, mtime_ns, record_id),
+                    )
+                current = connection.execute(
                     "SELECT * FROM media_records WHERE id = ?", (record_id,)
                 ).fetchone()
-        return self._to_record(row)
+                records.append(self._to_record(current))
+        return records
+
+    @staticmethod
+    def _reuse_existing_analysis(
+        connection: sqlite3.Connection, record_id: str, fingerprint: str
+    ) -> None:
+        donors = connection.execute(
+            """
+            SELECT * FROM media_records
+            WHERE fingerprint = ? AND id != ?
+              AND status IN (?, ?, ?)
+            ORDER BY updated_at DESC
+            """,
+            (
+                fingerprint,
+                record_id,
+                Status.ANALYZED.value,
+                Status.COMPLETED.value,
+                Status.MISSING.value,
+            ),
+        ).fetchall()
+        donor = next((row for row in donors if _row_has_analysis(row)), None)
+        if donor is None:
+            return
+        connection.execute(
+            """
+            UPDATE media_records
+            SET status = ?, description = ?, highlights_json = ?,
+                keywords_json = ?, error = NULL
+            WHERE id = ?
+            """,
+            (
+                Status.ANALYZED.value,
+                donor["description"],
+                donor["highlights_json"],
+                donor["keywords_json"],
+                record_id,
+            ),
+        )
+
+    def scan_index(self) -> dict[str, tuple[str, int | None, int | None]]:
+        """Newest known (fingerprint, size, mtime_ns) per case-folded path."""
+        with self._connect() as connection:
+            rows = connection.execute(
+                """
+                SELECT normalized_path, fingerprint, source_size, source_mtime_ns
+                FROM media_records
+                WHERE status != ?
+                ORDER BY updated_at, discovered_at
+                """,
+                (Status.MISSING.value,),
+            ).fetchall()
+        return {
+            row["normalized_path"].casefold(): (
+                row["fingerprint"],
+                row["source_size"],
+                row["source_mtime_ns"],
+            )
+            for row in rows
+        }
+
+    def mark_missing_sources(
+        self,
+        seen: dict[str, str],
+        *,
+        scanned_types: tuple[str, ...] = ("image/", "video/"),
+    ) -> int:
+        """Retire rows whose source is gone or was replaced by newer content.
+
+        ``seen`` maps case-folded paths found by the scan to their fingerprint.
+        A row whose path was not seen is only retired when the file really no
+        longer exists, so an unreadable folder never loses its rows.
+        """
+        retired: list[str] = []
+        with self._connect() as connection:
+            rows = connection.execute(
+                "SELECT id, normalized_path, fingerprint, media_type "
+                "FROM media_records WHERE status != ?",
+                (Status.MISSING.value,),
+            ).fetchall()
+            for row in rows:
+                if not row["media_type"].startswith(scanned_types):
+                    continue
+                current = seen.get(row["normalized_path"].casefold())
+                if current is not None:
+                    if current != row["fingerprint"]:
+                        retired.append(row["id"])
+                elif not Path(row["normalized_path"]).exists():
+                    retired.append(row["id"])
+            timestamp = _now()
+            connection.executemany(
+                "UPDATE media_records SET status = ?, updated_at = ? WHERE id = ?",
+                [(Status.MISSING.value, timestamp, identity) for identity in retired],
+            )
+        return len(retired)
 
     def get_record(self, record_id: str) -> MediaRecord | None:
         with self._connect() as connection:
@@ -103,12 +267,34 @@ class CatalogDatabase:
             ).fetchone()
         return self._to_record(row) if row is not None else None
 
-    def list_records(self) -> list[MediaRecord]:
+    def list_records(self, *, include_missing: bool = False) -> list[MediaRecord]:
         with self._connect() as connection:
             rows = connection.execute(
-                "SELECT * FROM media_records ORDER BY discovered_at, id"
+                "SELECT * FROM media_records WHERE ? OR status != ? "
+                "ORDER BY discovered_at, id",
+                (int(include_missing), Status.MISSING.value),
             ).fetchall()
         return [self._to_record(row) for row in rows]
+
+    def media_summary(self, *, video_only: bool = False) -> tuple[int, int, int]:
+        """(video count, image count, total source bytes) in one query.
+
+        Uses the sizes stored by the scan instead of a stat() per record,
+        which froze the UI every second on large NAS/USB catalogs.
+        """
+        with self._connect() as connection:
+            row = connection.execute(
+                """
+                SELECT
+                    COALESCE(SUM(media_type LIKE 'video/%'), 0) AS videos,
+                    COALESCE(SUM(media_type LIKE 'image/%'), 0) AS images,
+                    COALESCE(SUM(source_size), 0) AS bytes
+                FROM media_records
+                WHERE status != ? AND (? = 0 OR media_type LIKE 'video/%')
+                """,
+                (Status.MISSING.value, int(video_only)),
+            ).fetchone()
+        return int(row["videos"]), int(row["images"]), int(row["bytes"])
 
     def list_by_status(self, statuses: Sequence[Status]) -> list[MediaRecord]:
         if not statuses:
@@ -123,23 +309,12 @@ class CatalogDatabase:
         return [self._to_record(row) for row in rows]
 
     def requeue_processing(self, *, video_only: bool = False) -> int:
-        with self._connect() as connection:
-            cursor = connection.execute(
-                """
-                UPDATE media_records
-                SET status = ?, error = NULL, updated_at = ?
-                WHERE status = ? AND (? = 0 OR media_type LIKE 'video/%')
-                """,
-                (
-                    Status.PENDING.value,
-                    _now(),
-                    Status.PROCESSING.value,
-                    int(video_only),
-                ),
-            )
-        return cursor.rowcount
+        return self._requeue_status(Status.PROCESSING, video_only=video_only)
 
     def requeue_failed(self, *, video_only: bool = False) -> int:
+        return self._requeue_status(Status.FAILED, video_only=video_only)
+
+    def _requeue_status(self, status: Status, *, video_only: bool) -> int:
         with self._connect() as connection:
             cursor = connection.execute(
                 """
@@ -150,7 +325,7 @@ class CatalogDatabase:
                 (
                     Status.PENDING.value,
                     _now(),
-                    Status.FAILED.value,
+                    status.value,
                     int(video_only),
                 ),
             )
@@ -269,3 +444,17 @@ class CatalogDatabase:
             discovered_at=row["discovered_at"],
             updated_at=row["updated_at"],
         )
+
+
+def _row_has_analysis(row: sqlite3.Row) -> bool:
+    description = row["description"]
+    highlights = json.loads(row["highlights_json"] or "[]")
+    keywords = json.loads(row["keywords_json"] or "[]")
+    return (
+        isinstance(description, str)
+        and bool(description.strip())
+        and bool(highlights)
+        and all(isinstance(item, str) and item.strip() for item in highlights)
+        and bool(keywords)
+        and all(isinstance(item, str) and item.strip() for item in keywords)
+    )

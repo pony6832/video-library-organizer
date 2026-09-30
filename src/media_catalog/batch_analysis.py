@@ -7,7 +7,7 @@ from pathlib import Path
 
 from .analysis_mode import AnalysisMode
 from .database import CatalogDatabase
-from .excel_catalog import write_excel
+from .excel_catalog import ExcelCheckpoint, write_excel
 from .force_gemini import plan_force_run
 from .inference import AnalysisError
 from .models import MediaRecord, Status, has_complete_analysis
@@ -24,6 +24,61 @@ from .workspace import MediaWorkspace
 
 
 ProgressCallback = Callable[[int, int, MediaRecord], None]
+
+_CLOUD_WARNING_PREFIXES = ("Gemini 強化失敗", "Gemini model discovery failed:")
+
+
+def _is_cloud_warning(record: MediaRecord) -> bool:
+    return (
+        record.status is Status.ANALYZED
+        and bool(record.error)
+        and record.error.startswith(_CLOUD_WARNING_PREFIXES)
+    )
+
+
+class _RunTally:
+    """Completed/failed counts kept incrementally.
+
+    Re-reading the whole catalog after every item made a run O(N^2); with
+    tens of thousands of records the bookkeeping dwarfed the analysis.
+    """
+
+    def __init__(
+        self,
+        records: Iterable[MediaRecord],
+        force_eligible_ids: set[str] | None,
+    ) -> None:
+        self._force_eligible_ids = force_eligible_ids
+        self._completed: set[str] = set()
+        self._failed: set[str] = set()
+        self.last_cloud_warning: str | None = None
+        for record in records:
+            self.update(record)
+
+    def update(self, record: MediaRecord) -> None:
+        eligible = (
+            self._force_eligible_ids is None
+            or record.id in self._force_eligible_ids
+        )
+        is_media = record.media_type.startswith(("image/", "video/"))
+        if is_media and (has_complete_analysis(record) or not eligible):
+            self._completed.add(record.id)
+        else:
+            self._completed.discard(record.id)
+        if eligible and (record.status is Status.FAILED or _is_cloud_warning(record)):
+            self._failed.add(record.id)
+        else:
+            self._failed.discard(record.id)
+        if record.error and record.error.startswith(_CLOUD_WARNING_PREFIXES):
+            self.last_cloud_warning = record.error
+
+    @property
+    def completed(self) -> int:
+        return len(self._completed)
+
+    @property
+    def failed(self) -> int:
+        return len(self._failed)
 
 
 @dataclass(frozen=True, slots=True)
@@ -64,11 +119,7 @@ def analyze_pending(
         image_count = sum(
             record.media_type.startswith("image/") for record in initial_records
         )
-        total_bytes = sum(
-            record.path.stat().st_size
-            for record in initial_records
-            if record.path.is_file()
-        )
+        _, _, total_bytes = database.media_summary(video_only=video_only)
         if active_run_id is None:
             run, _ = run_state.begin_run(
                 root_path=workspace.root,
@@ -189,20 +240,18 @@ def analyze_pending(
             if force_eligible_ids is None
             or record.id in force_eligible_ids
         )
-        fatal = sum(record.status is Status.FAILED for record in scoped)
-        warnings = sum(
-            record.status is Status.ANALYZED
-            and bool(record.error)
-            and record.error.startswith(("Gemini 強化失敗", "Gemini model discovery failed:"))
+        return sum(
+            record.status is Status.FAILED or _is_cloud_warning(record)
             for record in scoped
         )
-        return fatal + warnings
 
     def persist_cloud_warning(records: Iterable[MediaRecord]) -> None:
         if run_state is None or active_run_id is None:
             return
-        warnings = [r.error for r in records if r.error and r.error.startswith(
-            ("Gemini 強化失敗", "Gemini model discovery failed:"))]
+        warnings = [
+            r.error for r in records
+            if r.error and r.error.startswith(_CLOUD_WARNING_PREFIXES)
+        ]
         if warnings:
             run_state.set_gemini_error(active_run_id, sanitize_error(warnings[-1]))
 
@@ -231,17 +280,25 @@ def analyze_pending(
                 excel_sync_pending = False
                 run_state.set_excel_sync_pending(active_run_id, False)
 
+    tally = _RunTally(initial_records, force_eligible_ids)
+    persisted_cloud_warning: list[str | None] = [None]
+    checkpoint_excel = ExcelCheckpoint(sync_excel)
+
     def update_run(current_media_id: str | None = None) -> None:
+        if current_media_id is not None:
+            current = database.get_record(current_media_id)
+            if current is not None:
+                tally.update(current)
         if run_state is None or active_run_id is None:
             return
-        records = scoped_records()
-        durable_completed = completed_count(records)
-        current_failed_count = failed_count(records)
-        persist_cloud_warning(records)
+        warning = tally.last_cloud_warning
+        if warning and warning != persisted_cloud_warning[0]:
+            run_state.set_gemini_error(active_run_id, sanitize_error(warning))
+            persisted_cloud_warning[0] = warning
         run_state.update_counts(
             active_run_id,
-            completed_media=durable_completed,
-            failed_media=current_failed_count,
+            completed_media=tally.completed,
+            failed_media=tally.failed,
             current_media_id=current_media_id,
             current_segment_id=None,
             status="running",
@@ -268,8 +325,7 @@ def analyze_pending(
                     error=sanitize_error(str(error)),
                 )
                 completed += 1
-                if completed % 100 == 0:
-                    sync_excel()
+                checkpoint_excel(completed)
                 update_run(record.id)
                 if progress is not None:
                     current = database.get_record(record.id)
@@ -290,7 +346,13 @@ def analyze_pending(
                         record, active_run_id, mode=mode
                     )
                     warning = result.warning
-                    if gemini_client is not None and gemini_client.discovery_error:
+                    if (
+                        not warning
+                        and gemini_client is not None
+                        and gemini_client.discovery_error
+                    ):
+                        # Keep the real segment warning; only fall back to
+                        # the run-wide discovery failure when there is none.
                         warning = f"Gemini model discovery failed: {gemini_client.discovery_error}"
                 elif mode is AnalysisMode.FORCE_GEMINI:
                     forced = analyzer.force_image_analyzer.analyze(record.path)
@@ -310,17 +372,26 @@ def analyze_pending(
                     error=sanitize_error(str(error)),
                 )
             else:
-                database.save_analysis(
-                    record.id,
-                    description=result.description,
-                    highlights=result.highlights,
-                    keywords=result.keywords,
-                    warning=warning,
-                )
-                analyzed += 1
+                try:
+                    database.save_analysis(
+                        record.id,
+                        description=result.description,
+                        highlights=result.highlights,
+                        keywords=result.keywords,
+                        warning=warning,
+                    )
+                except ValueError as error:
+                    # Whitespace-only model output must fail this item, not
+                    # crash the worker with the record stuck in PROCESSING.
+                    database.set_status(
+                        record.id,
+                        Status.FAILED,
+                        error=sanitize_error(str(error)),
+                    )
+                else:
+                    analyzed += 1
             completed += 1
-            if completed % 100 == 0:
-                sync_excel()
+            checkpoint_excel(completed)
             update_run(record.id)
             if progress is not None:
                 current = database.get_record(record.id)
