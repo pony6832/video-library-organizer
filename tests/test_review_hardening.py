@@ -570,3 +570,16 @@ def test_force_runs_get_distinct_generations(tmp_path: Path) -> None:
 
     assert created
     assert second.force_generation == first.force_generation + 1
+
+
+def test_batched_scan_keeps_stable_file_order(tmp_path: Path) -> None:
+    # One transaction can stamp many rows with the same discovered_at; the
+    # catalog must still list them in scan order, not by random UUID.
+    names = [f"clip-{number:03}.mp4" for number in range(50)]
+    for name in names:
+        (tmp_path / name).write_bytes(name.encode())
+    workspace = bootstrap_workspace(tmp_path).workspace
+
+    listed = [r.path.name for r in CatalogDatabase(workspace.database_path).list_records()]
+
+    assert listed == names

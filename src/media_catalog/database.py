@@ -112,7 +112,7 @@ class CatalogDatabase:
                     """
                     SELECT * FROM media_records
                     WHERE normalized_path = ? COLLATE NOCASE AND fingerprint = ?
-                    ORDER BY discovered_at, id
+                    ORDER BY discovered_at, rowid
                     LIMIT 1
                     """,
                     (normalized_path, fingerprint),
@@ -212,7 +212,7 @@ class CatalogDatabase:
                 SELECT normalized_path, fingerprint, source_size, source_mtime_ns
                 FROM media_records
                 WHERE status != ?
-                ORDER BY updated_at, discovered_at
+                ORDER BY updated_at, discovered_at, rowid
                 """,
                 (Status.MISSING.value,),
             ).fetchall()
@@ -271,7 +271,7 @@ class CatalogDatabase:
         with self._connect() as connection:
             rows = connection.execute(
                 "SELECT * FROM media_records WHERE ? OR status != ? "
-                "ORDER BY discovered_at, id",
+                "ORDER BY discovered_at, rowid",
                 (int(include_missing), Status.MISSING.value),
             ).fetchall()
         return [self._to_record(row) for row in rows]
@@ -303,7 +303,7 @@ class CatalogDatabase:
         with self._connect() as connection:
             rows = connection.execute(
                 f"SELECT * FROM media_records WHERE status IN ({placeholders}) "
-                "ORDER BY discovered_at, id",
+                "ORDER BY discovered_at, rowid",
                 tuple(status.value for status in statuses),
             ).fetchall()
         return [self._to_record(row) for row in rows]
