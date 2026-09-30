@@ -17,3 +17,12 @@ test = ["pytest>=8,<9", "PyYAML>=6,<7"]
 [tool.pytest.ini_options]
 pythonpath = ["src"]
 testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+# Start with correctness rules (syntax errors, undefined names, unused
+# imports/variables); widen once the existing style is normalized.
+select = ["E9", "F"]

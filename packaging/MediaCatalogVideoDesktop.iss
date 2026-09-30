@@ -4,11 +4,14 @@
 #ifndef ReleaseDir
   #error ReleaseDir is required
 #endif
+#ifndef AppVersion
+  #error AppVersion is required (scripts/build-desktop.ps1 reads it from pyproject.toml)
+#endif
 
 [Setup]
 AppId={code:GetAppId}
 AppName=Media Catalog Video Desktop
-AppVersion=0.2.0
+AppVersion={#AppVersion}
 AppPublisher=Media Catalog Project
 DefaultDirName={localappdata}\Programs\MediaCatalogVideoDesktop
 DefaultGroupName=Media Catalog Video Desktop

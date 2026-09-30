@@ -8,7 +8,6 @@ from media_catalog.bootstrap import bootstrap_workspace
 from media_catalog.batch_analysis import analyze_pending
 from media_catalog.database import CatalogDatabase
 from media_catalog.inference import Analysis
-from media_catalog.workspace import MediaWorkspace
 
 
 def test_catalog_writes_visible_excel_at_first_100_then_throttles(tmp_path, monkeypatch):

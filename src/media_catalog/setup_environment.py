@@ -7,7 +7,7 @@ import shutil
 import subprocess
 import sys
 from .process_utils import HIDDEN_PROCESS_CREATION_FLAGS, credential_free_environment
-from .mcp_installation import mcp_ready, prepare_mcp_install
+from .mcp_installation import MCP_VIDEO_ANALYZER_VERSION, mcp_ready, prepare_mcp_install
 from .local_models import DEFAULT_LOCAL_MODEL
 
 MODEL = DEFAULT_LOCAL_MODEL
@@ -109,7 +109,8 @@ class EnvironmentSetup:
         if npm and not report['checks']['mcp-video-analyzer']:
             progress('正在準備影片擷取工具…')
             target = prepare_mcp_install(self.root)
-            self._execute([npm, 'install', '--prefix', str(target), '--no-audit', '--no-fund', 'mcp-video-analyzer@0.8.0'], 900)
+            self._execute([npm, 'install', '--prefix', str(target), '--no-audit', '--no-fund', '--omit=dev',
+                f'mcp-video-analyzer@{MCP_VIDEO_ANALYZER_VERSION}'], 900)
         if ollama and not report['checks'][MODEL]:
             progress('正在下載 Qwen3.5 9B 本機視覺模型（約 6.6 GB），請保持網路連線…')
             self._execute([ollama, 'pull', MODEL], 3600)

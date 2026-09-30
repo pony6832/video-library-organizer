@@ -17,6 +17,8 @@ description: Use when the user 貼上單一本機資料夾路徑，或要求整�
 powershell -NoProfile -ExecutionPolicy Bypass -File "<skill-root>\scripts\run_media_catalog.ps1" -RootPath '<path>'
 ```
 
+`<path>` 放在 PowerShell 單引號字串內：路徑中的每個 `'` 必須改寫成兩個 `''`（例如 `D:\Tom's Videos` → `'D:\Tom''s Videos'`），不可改用雙引號，也不可加入其他命令或字元。
+
 將 `MEDIA_CATALOG_READY` 視為完成，並回傳 `catalog=` 指向的 Excel 清冊。若出現 `MEDIA_CATALOG_ERROR`，回報錯誤且不要改用其他根目錄。
 
 ## 建立清冊並分析全部待處理媒體

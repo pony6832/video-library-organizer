@@ -20,7 +20,6 @@ from .excel_catalog import (
 from .force_gemini import validate_force_environment
 from .inference import AnalysisError, LocalAnalyzer
 from .local_models import DEFAULT_LOCAL_MODEL
-from .models import Status
 from .run_lock import AnalysisAlreadyRunningError, analysis_run_lock
 from .run_state import RunStateStore
 from .stage_runner import HeartbeatThread

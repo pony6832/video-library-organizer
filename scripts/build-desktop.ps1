@@ -29,7 +29,10 @@ try {
     Copy-Item -LiteralPath packaging/README-zh-TW.md, packaging/THIRD-PARTY-NOTICES.txt -Destination $bundle
     & $python packaging/audit_bundle.py $bundle --frozen-archive
     if ($LASTEXITCODE -ne 0) { throw 'Bundle audit failed' }
-    & $compiler /Q "/DBundleDir=$bundle" "/DReleaseDir=$release" packaging/MediaCatalogVideoDesktop.iss
+    # pyproject.toml is the single source of the release version.
+    $appVersion = (& $python -c "import sys, tomllib; print(tomllib.load(open(sys.argv[1], 'rb'))['project']['version'])" (Join-Path $projectRoot 'pyproject.toml')).Trim()
+    if ($LASTEXITCODE -ne 0 -or -not $appVersion) { throw 'Cannot read version from pyproject.toml' }
+    & $compiler /Q "/DBundleDir=$bundle" "/DReleaseDir=$release" "/DAppVersion=$appVersion" packaging/MediaCatalogVideoDesktop.iss
     if ($LASTEXITCODE -ne 0) { throw 'Inno Setup failed' }
     $files = @(Get-ChildItem -LiteralPath $release -Recurse -File)
     $receipt = @($files | ForEach-Object {

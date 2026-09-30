@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import os
 import re
 import shutil
 import subprocess
@@ -400,7 +399,7 @@ class FfmpegImagePreparer:
             "3",
             str(preview),
         ]
-        result = _run_tool(
+        _run_tool(
             self.runner, arguments, self.timeout, label="ffmpeg preview"
         )
         if not preview.is_file() or preview.stat().st_size == 0:
