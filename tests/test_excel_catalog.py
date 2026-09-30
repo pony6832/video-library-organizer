@@ -212,6 +212,31 @@ def test_gemini_warning_keeps_analysis_visible_for_manual_review(
     assert row[11] == "Gemini 強化失敗:GeminiError"
 
 
+def test_write_excel_accepts_stream_without_materializing_records(tmp_path: Path, monkeypatch) -> None:
+    from media_catalog import excel_catalog
+    from media_catalog.database import CatalogDatabase
+    database = CatalogDatabase(tmp_path / 'catalog.sqlite')
+    records = []
+    for index in range(3):
+        source = tmp_path / f'clip-{index}.mp4'
+        source.write_bytes(b'clip')
+        records.append(database.upsert_discovered(source, str(index), 'video/mp4'))
+
+    # This checks the implementation uses write-only mode; output is checked too.
+    original = excel_catalog.Workbook
+    modes = []
+    def recording_workbook(*args, **kwargs):
+        modes.append(kwargs.get('write_only'))
+        return original(*args, **kwargs)
+    monkeypatch.setattr(excel_catalog, 'Workbook', recording_workbook)
+    output = write_excel((record for record in records), tmp_path / 'catalog.xlsx')
+    assert modes == [True]
+    workbook = load_workbook(output)
+    assert workbook.active.max_row == 4
+    assert str(workbook.active.data_validations.dataValidation[0].sqref) == 'A2:A4'
+    workbook.close()
+
+
 def test_corrupt_existing_catalog_is_not_overwritten(tmp_path: Path) -> None:
     output = tmp_path / "catalog.xlsx"
     output.write_bytes(b"damaged-review-data")

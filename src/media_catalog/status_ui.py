@@ -48,6 +48,8 @@ class StatusViewModel:
     current_text: str
     gemini_text: str
     failure_text: str
+    segment_number: int = 0
+    segment_total: int = 0
 
     @classmethod
     def idle(cls) -> "StatusViewModel":
@@ -143,6 +145,8 @@ class StatusViewModel:
             current_text=current_text,
             gemini_text=f"{min(max(gemini_used, 0), 12)} / 12",
             failure_text=f"失敗／降級：{max(0, run.failed_media)}",
+            segment_number=segment_number,
+            segment_total=segment_total,
         )
 
     @staticmethod

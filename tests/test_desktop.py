@@ -78,6 +78,15 @@ def test_desktop_status_uses_actual_model_and_error():
     assert 'quota exhausted' in cloud_status(Mock(gemini_model='gemini-test', gemini_error='quota exhausted'))
 
 
+def test_segment_percent_is_bounded_and_does_not_claim_completion():
+    from media_catalog.desktop import segment_percent
+    assert segment_percent(0, 0) == 0
+    assert segment_percent(1, 4) == 0
+    assert segment_percent(3, 4) == 50
+    assert segment_percent(4, 4) == 75
+    assert segment_percent(5, 4) == 75
+
+
 def test_setup_timeout_is_actionable(tmp_path):
     from media_catalog.setup_environment import EnvironmentSetup
     import subprocess
@@ -101,6 +110,7 @@ def test_desktop_idle_layout_and_single_primary_action(tmp_path):
         assert app.workspace is None
         assert app.start_button.cget('state') == 'disabled'
         assert app.path_var.get() == '尚未選擇'
+        assert root.winfo_reqheight() <= root.minsize()[1]
         supervisor.start.assert_not_called()
         supervisor.start_catalog.assert_not_called()
     finally:

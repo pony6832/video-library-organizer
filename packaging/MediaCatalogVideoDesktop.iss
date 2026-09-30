@@ -8,7 +8,7 @@
 [Setup]
 AppId={code:GetAppId}
 AppName=Media Catalog Video Desktop
-AppVersion=0.1.0
+AppVersion=0.2.0
 AppPublisher=Media Catalog Project
 DefaultDirName={localappdata}\Programs\MediaCatalogVideoDesktop
 DefaultGroupName=Media Catalog Video Desktop

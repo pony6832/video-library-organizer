@@ -28,6 +28,11 @@ def analysis_progress_text(percent: int, progress: str, remaining: str) -> str:
     return f'{percent}%　已完成 {progress}　未完成 {remaining}'
 
 
+def segment_percent(number: int, total: int) -> int:
+    """Completed segments before the active one; never imply it has finished."""
+    return max(0, min(total - 1, number - 1) * 100 // total) if total > 0 else 0
+
+
 def select_video_root(selected, supervisor, app_root):
     if not selected:
         return None
@@ -58,8 +63,8 @@ class DesktopApplication(StatusApplication):
             set_session_key(saved_key)
         self.key_status_var.set('Key 已儲存' if saved_key else '尚未設定 Key')
         root.title('影片資料庫整理')
-        root.geometry('1080x730')
-        root.minsize(920, 680)
+        root.geometry('1080x790')
+        root.minsize(920, 740)
         root.after(150, self._drain_events)
         if media_root:
             self._select(str(media_root))
@@ -70,12 +75,12 @@ class DesktopApplication(StatusApplication):
         style = ttk.Style(self.root)
         style.theme_use('clam')
         style.configure('TCombobox', padding=5)
-        panel = tk.Frame(self.root, bg='#0F172A', padx=28, pady=18)
+        panel = tk.Frame(self.root, bg='#0F172A', padx=28, pady=12)
         panel.pack(fill='both', expand=True)
         tk.Label(panel, text='影片資料庫整理', bg='#0F172A', fg='#F8FAFC',
                  font=('Microsoft JhengHei UI', 23, 'bold'), anchor='w').pack(fill='x')
         tk.Label(panel, text='建立清冊 → 分析影片 → 搜尋與檢閱成果｜原始檔案保持不變',
-                 bg='#0F172A', fg='#CBD5E1', anchor='w').pack(fill='x', pady=(3, 12))
+                 bg='#0F172A', fg='#CBD5E1', anchor='w').pack(fill='x', pady=(3, 8))
         status = tk.Frame(panel, bg='#0F172A')
         status.pack(fill='x', pady=(0, 8))
         self.light = tk.Canvas(status, width=22, height=22, bg='#0F172A', highlightthickness=0)
@@ -84,7 +89,7 @@ class DesktopApplication(StatusApplication):
         tk.Label(status, textvariable=self.status_var, bg='#0F172A', fg='#F8FAFC', anchor='w').pack(side='left', padx=8)
         self._section(panel, '1  選擇影片資料夾')
         row = tk.Frame(panel, bg='#0F172A')
-        row.pack(fill='x', pady=6)
+        row.pack(fill='x', pady=4)
         self.select_button = self._button(row, '選擇資料夾…', self._choose_folder)
         self.select_button.pack(side='left', padx=(0, 12))
         tk.Label(row, textvariable=self.path_var, bg='#0F172A', fg='#E2E8F0', anchor='w',
@@ -92,7 +97,7 @@ class DesktopApplication(StatusApplication):
         self._label(panel, '影片統計', self.counts_var)
         self._section(panel, '2  選擇分析方式')
         modes = tk.Frame(panel, bg='#0F172A')
-        modes.pack(fill='x', pady=6)
+        modes.pack(fill='x', pady=4)
         self.mode_var = tk.StringVar(value='自動分析（本機優先）')
         self.mode_box = ttk.Combobox(modes, textvariable=self.mode_var, state='readonly', width=28,
             values=['自動分析（本機優先）', 'Gemini 強化（雲端付費）'])
@@ -101,7 +106,9 @@ class DesktopApplication(StatusApplication):
         tk.Label(modes, textvariable=self.key_status_var, bg='#0F172A', fg='#CBD5E1').pack(side='left', padx=(16, 8))
         self.key_button = self._button(modes, '設定／更換 Key', self._key_dialog)
         self.key_button.pack(side='left')
-        tk.Label(panel, text='自動模式以本機模型為主；若提供 Key，低信心內容可傳送縮圖至 Gemini。',
+        self.check_key_button = self._button(modes, '檢查 Key', self._check_key)
+        self.check_key_button.pack(side='left', padx=(8, 0))
+        tk.Label(panel, text='本機：Qwen3.5 9B｜自動模式以本機為主；提供 Key 時，低信心縮圖可送至 Gemini。',
                  bg='#0F172A', fg='#CBD5E1', anchor='w').pack(fill='x')
         self._label(panel, '分析進度', self.progress_var)
         self._label(panel, '目前影片', self.current_var)
@@ -109,9 +116,13 @@ class DesktopApplication(StatusApplication):
         self._label(panel, '雲端狀態', self.cloud_var, wraplength=740)
         self._label(panel, '處理結果', self.failure_var)
         self.progress = ttk.Progressbar(panel, maximum=100)
-        self.progress.pack(fill='x', pady=8)
+        self.progress.pack(fill='x', pady=5)
+        self.segment_var = tk.StringVar(value='片段進度：尚未開始')
+        self._label(panel, '本片進度', self.segment_var)
+        self.segment_bar = ttk.Progressbar(panel, maximum=100)
+        self.segment_bar.pack(fill='x', pady=(2, 8))
         actions = tk.Frame(panel, bg='#0F172A')
-        actions.pack(fill='x', pady=(0, 8))
+        actions.pack(fill='x', pady=(0, 5))
         self.start_button = self._button(actions, '開始／繼續分析', self._start,
             background='#1D4ED8', active_background='#2563EB')
         self.start_button.pack(side='left', padx=(0, 10))
@@ -119,7 +130,7 @@ class DesktopApplication(StatusApplication):
         self.stop_button.pack(side='left')
         self._section(panel, '3  查看成果')
         footer = tk.Frame(panel, bg='#0F172A')
-        footer.pack(fill='x', pady=8)
+        footer.pack(fill='x', pady=5)
         self.excel_button = self._button(footer, '開啟 Excel 清冊', lambda: self._open_workspace_path('excel'))
         self.excel_button.pack(side='left', padx=(0, 10))
         self.result_button = self._button(footer, '開啟成果資料夾', lambda: self._open_workspace_path('result'))
@@ -129,7 +140,7 @@ class DesktopApplication(StatusApplication):
 
     def _section(self, panel, text):
         self.tk.Label(panel, text=text, bg='#0F172A', fg='#93C5FD', anchor='w',
-            font=('Microsoft JhengHei UI', 12, 'bold')).pack(fill='x', pady=(9, 1))
+            font=('Microsoft JhengHei UI', 12, 'bold')).pack(fill='x', pady=(6, 1))
 
     def _button(self, *args, **kwargs):
         button = super()._button(*args, **kwargs)
@@ -137,8 +148,8 @@ class DesktopApplication(StatusApplication):
         return button
 
     def _label(self, parent, title, variable, *, wraplength=0):
-        row = self.tk.Frame(parent, bg='#1E293B', padx=14, pady=6)
-        row.pack(fill='x', pady=3)
+        row = self.tk.Frame(parent, bg='#1E293B', padx=14, pady=4)
+        row.pack(fill='x', pady=2)
         self.tk.Label(row, text=title, width=10, anchor='w', bg='#1E293B', fg='#CBD5E1',
             font=('Microsoft JhengHei UI', 10)).pack(side='left')
         self.tk.Label(row, textvariable=variable, anchor='w', justify='left',
@@ -174,6 +185,29 @@ class DesktopApplication(StatusApplication):
             window.destroy()
 
         self.ttk.Button(window, text='儲存 Key', command=save).pack(pady=12)
+
+    def _check_key(self):
+        if self.supervisor.is_busy or self.setup_busy:
+            return
+        key = os.environ.get('GEMINI_API_KEY', '').strip()
+        if not key:
+            self.key_status_var.set('尚未設定 Key；請先儲存')
+            return
+        self.check_key_button.configure(state='disabled')
+        self.key_status_var.set('正在檢查 Key…')
+
+        def work():
+            from .gemini_client import GeminiClient, GeminiError
+            try:
+                model = GeminiClient(timeout_seconds=15).discover_model(key=key)
+                message = f'Key 可列出模型｜最新正式 Flash：{model}'
+            except GeminiError as error:
+                message = f'Key 檢查未通過：{error}'
+            except Exception:
+                message = 'Key 檢查未完成：網路或服務暫時無法使用'
+            self.events.put(('key_check', message))
+
+        threading.Thread(target=work, daemon=True).start()
 
     def _select(self, selected):
         try:
@@ -227,6 +261,12 @@ class DesktopApplication(StatusApplication):
             self.progress['value'] = model.progress_percent
         self.counts_var.set(f'影片：{model.video_count}　容量：{model.total_size_text}　（不新增或分析照片）')
         self.status_var.set(model.status_text.replace('worker', '分析程序'))
+        if model.segment_total and model.segment_number:
+            self.segment_var.set(f'第 {model.segment_number}／{model.segment_total} 段；已完成前 {model.segment_number - 1} 段')
+            self.segment_bar['value'] = segment_percent(model.segment_number, model.segment_total)
+        else:
+            self.segment_var.set('片段進度：尚未開始或目前影片已完成')
+            self.segment_bar['value'] = 0
 
     def _view_model(self, snapshot):
         model = super()._view_model(snapshot)
@@ -255,6 +295,7 @@ class DesktopApplication(StatusApplication):
         self.stop_button.configure(state='normal' if self.supervisor.is_busy else 'disabled')
         self.mode_box.configure(state='disabled' if busy else 'readonly')
         self.key_button.configure(state='disabled' if busy else 'normal')
+        self.check_key_button.configure(state='disabled' if busy else 'normal')
         self.setup_button.configure(state='disabled' if busy else 'normal')
         setup_window = getattr(self, 'setup_window', None)
         if setup_window is not None and setup_window.winfo_exists():
@@ -275,7 +316,7 @@ class DesktopApplication(StatusApplication):
         window.title('首次設定與環境檢查')
         window.geometry('740x420')
         window.transient(self.root)
-        self.setup_text = self.tk.StringVar(value='按「檢查環境」只檢查，不下載、不分析影片。\n安裝會下載 FFmpeg、Node.js、Ollama 及約 6 GB 本機模型。\n需要網路、足夠磁碟空間；Windows 可能要求管理員確認。')
+        self.setup_text = self.tk.StringVar(value='按「檢查環境」只檢查，不下載、不分析影片。\n安裝會下載 FFmpeg、Node.js、Ollama 及約 6.6 GB 的 Qwen3.5 9B 本機模型。\n需要網路、足夠磁碟空間；Windows 可能要求管理員確認。')
         self.tk.Label(window, textvariable=self.setup_text, justify='left', anchor='nw',
             wraplength=690, padx=20, pady=20).pack(fill='both', expand=True)
         buttons = self.tk.Frame(window, padx=20, pady=20)
@@ -309,6 +350,10 @@ class DesktopApplication(StatusApplication):
         try:
             while True:
                 kind, message = self.events.get_nowait()
+                if kind == 'key_check':
+                    self.key_status_var.set(message)
+                    self.check_key_button.configure(state='normal')
+                    continue
                 self.setup_text.set(message)
                 if kind == 'done':
                     self.setup_busy = False

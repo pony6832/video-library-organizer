@@ -18,6 +18,7 @@ from .excel_catalog import (
 )
 from .force_gemini import validate_force_environment
 from .inference import AnalysisError, LocalAnalyzer
+from .local_models import DEFAULT_LOCAL_MODEL
 from .models import Status
 from .run_lock import AnalysisAlreadyRunningError, analysis_run_lock
 from .source_guard import (
@@ -52,7 +53,7 @@ def _parser() -> argparse.ArgumentParser:
     analyze_parser.add_argument("root", type=Path)
     analyze_parser.add_argument("--skill-root", type=Path, required=True)
     analyze_parser.add_argument(
-        "--model", default="Qwen3-vl:8b-instruct"
+        "--model", default=DEFAULT_LOCAL_MODEL
     )
     analyze_parser.add_argument(
         "--mode",

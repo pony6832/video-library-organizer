@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import json
+import os
 from pathlib import Path
 
 import pytest
@@ -148,6 +149,31 @@ def test_client_reports_whether_private_environment_key_is_configured(
 
     monkeypatch.setenv("GEMINI_API_KEY", "unit-test-secret")
     assert client.is_configured is True
+
+
+def test_key_check_uses_explicit_key_and_only_lists_models(monkeypatch):
+    monkeypatch.setenv('GEMINI_API_KEY', 'other-key')
+
+    class ListOnlyTransport:
+        def __init__(self):
+            self.headers = None
+            self.calls = 0
+
+        def get(self, url, *, headers, timeout):
+            self.calls += 1
+            self.headers = headers
+            return {'models': [{'name': 'models/gemini-3.8-flash',
+                                'supportedGenerationMethods': ['generateContent']}]}
+
+        def send(self, *args, **kwargs):
+            raise AssertionError('Key check must not generate content')
+
+    transport = ListOnlyTransport()
+    model = GeminiClient(transport=transport).discover_model(key='candidate-key')
+    assert model == 'gemini-3.8-flash'
+    assert transport.headers == {'x-goog-api-key': 'candidate-key'}
+    assert transport.calls == 1
+    assert os.environ['GEMINI_API_KEY'] == 'other-key'
 
 
 def test_malformed_provider_response_is_rejected(

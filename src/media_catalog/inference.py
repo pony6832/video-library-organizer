@@ -516,6 +516,7 @@ class LocalAnalyzer:
             self.ollama_executable,
             "run",
             self.model,
+            *(['--think=false'] if self.model.casefold().split(':')[0] == 'qwen3.5' else []),
             "--format",
             "json",
             "--hidethinking",

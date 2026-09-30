@@ -98,10 +98,10 @@ class GeminiClient:
         self.model: str | None = None
         self.discovery_error: str | None = None
 
-    def discover_model(self) -> str:
+    def discover_model(self, *, key: str | None = None) -> str:
         from .model_catalog import select_latest_stable_flash
 
-        key = os.getenv("GEMINI_API_KEY", "").strip()
+        key = (os.getenv("GEMINI_API_KEY", "") if key is None else key).strip()
         if not key:
             raise GeminiError("GEMINI_API_KEY is not configured")
         models: list[dict[str, object]] = []

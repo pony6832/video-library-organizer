@@ -1,11 +1,12 @@
-# Media Catalog Agent
+# Media Catalog A+ Stable
 
-## 新版 Windows 影片專用桌面版
+## Windows 影片專用桌面版 0.2.0
 
-執行 `dist/<build-id>/MediaCatalogVideoDesktop-Setup.exe` 安裝，不需要 Codex 或 Python。
-目前審查修正版為 `dist/20260922-reviewed/MediaCatalogVideoDesktop-Setup.exe`；來源與驗證見 [發行紀錄](docs/desktop-release-20260922.md)。
+從 [最新安裝版](https://github.com/pony6832/media-catalog-a-plus-stable/releases/latest) 下載 `MediaCatalogVideoDesktop-Setup.exe`，雙擊安裝，不需要 Codex 或 Python。
+目前版本為 0.2.0，採用 Qwen3.5 9B Q4_K_M 本機辨識，Gemini 自動選擇帳號可用的最新正式 Flash。
+新增本片段進度、Key 檢查、每 100 筆 Excel 更新，以及以資料夾名稱作清冊前綴；來源與驗證見 [發行紀錄](docs/desktop-release-20260930-v020.md)。
 此獨立產品僅處理影片，與下方舊版 A+ Skill 並存、不覆蓋。
-安裝後先開啟「環境檢查／首次設定」，明確按安裝才下載缺少的工具與約 6 GB 本機模型。
+安裝後先開啟「環境檢查／首次設定」，按安裝下載缺少的工具與約 6.6 GB 本機模型。
 此輕量安裝包不含模型、使用者媒體或 API Key；**未數位簽章**，可能觸發 SmartScreen。
 完整操作及限制見 [繁體中文桌面版說明](packaging/README-zh-TW.md)。
 

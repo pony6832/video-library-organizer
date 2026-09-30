@@ -12,6 +12,7 @@ from openpyxl.utils.exceptions import InvalidFileException
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
+from openpyxl.cell import WriteOnlyCell
 
 from .models import MediaRecord, Status
 
@@ -76,15 +77,11 @@ def read_reviewed_paths(excel_path: Path) -> set[str]:
         if status_column is None or path_column is None:
             return set()
         return {
-            str(path_value)
-            for status_value, path_value in (
-                (
-                    sheet.cell(row, status_column).value,
-                    sheet.cell(row, path_column).value,
-                )
-                for row in range(2, sheet.max_row + 1)
-            )
-            if status_value == "已審核" and path_value
+            str(row[path_column - 1])
+            for row in sheet.iter_rows(min_row=2, values_only=True)
+            if len(row) >= max(status_column, path_column)
+            and row[status_column - 1] == "已審核"
+            and row[path_column - 1]
         }
     finally:
         workbook.close()
@@ -130,22 +127,34 @@ def read_reviewed_paths_strict(excel_path: Path) -> set[str]:
 def write_excel(records: Iterable[MediaRecord], output_path: Path) -> Path:
     destination = Path(output_path).resolve()
     destination.parent.mkdir(parents=True, exist_ok=True)
-    catalog_records = list(records)
     reviewed_paths = (
         {str(Path(path).resolve()).casefold() for path in read_reviewed_paths_strict(destination)}
         if destination.exists() else set()
     )
 
-    workbook = Workbook()
-    sheet = workbook.active
+    workbook = Workbook(write_only=True)
+    sheet = workbook.create_sheet()
     sheet.title = "媒體清冊"
-    sheet.append(CATALOG_HEADERS)
+    widths = (12, 28, 64, 18, 44, 36, 30, 20, 24, 54, 54, 40)
+    for index, width in enumerate(widths, start=1):
+        sheet.column_dimensions[get_column_letter(index)].width = width
+    sheet.freeze_panes = "A2"
+    sheet.sheet_view.showGridLines = False
+    header_fill = PatternFill("solid", fgColor="1F4E78")
+    header = []
+    for value in CATALOG_HEADERS:
+        cell = WriteOnlyCell(sheet, value=value)
+        cell.fill = header_fill
+        cell.font = Font(color="FFFFFF", bold=True)
+        cell.alignment = Alignment(horizontal="center")
+        header.append(cell)
+    sheet.append(header)
 
-    for record in catalog_records:
+    row_count = 0
+    for record in records:
         source_path = record.path.resolve()
         path_text = str(source_path)
-        sheet.append(
-            (
+        values = (
                 (
                     "已審核"
                     if path_text.casefold() in reviewed_paths
@@ -167,17 +176,21 @@ def write_excel(records: Iterable[MediaRecord], output_path: Path) -> Path:
                 str(record.backup_path) if record.backup_path else None,
                 record.error,
             )
-        )
         # Filenames and model output are data, even when they start with '='.
-        for cell in sheet[sheet.max_row]:
+        row = []
+        for value in values:
+            cell = WriteOnlyCell(sheet, value=value)
             if isinstance(cell.value, str):
                 cell.data_type = "s"
-        path_cell = sheet.cell(sheet.max_row, 3)
+            row.append(cell)
+        path_cell = row[2]
         if source_path.is_file():
             path_cell.hyperlink = source_path.as_uri()
             path_cell.style = "Hyperlink"
+        sheet.append(row)
+        row_count += 1
 
-    if catalog_records:
+    if row_count:
         review_validation = DataValidation(
             type="list",
             formula1='"待確認,已審核"',
@@ -187,21 +200,10 @@ def write_excel(records: Iterable[MediaRecord], output_path: Path) -> Path:
         review_validation.errorTitle = "無效狀態"
         review_validation.error = "請從下拉選單選擇待確認或已審核。"
         review_validation.showErrorMessage = True
-        sheet.add_data_validation(review_validation)
-        review_validation.add(f"A2:A{len(catalog_records) + 1}")
+        sheet.data_validations.append(review_validation)
+        review_validation.add(f"A2:A{row_count + 1}")
 
-    header_fill = PatternFill("solid", fgColor="1F4E78")
-    for cell in sheet[1]:
-        cell.fill = header_fill
-        cell.font = Font(color="FFFFFF", bold=True)
-        cell.alignment = Alignment(horizontal="center")
-
-    widths = (12, 28, 64, 18, 44, 36, 30, 20, 24, 54, 54, 40)
-    for index, width in enumerate(widths, start=1):
-        sheet.column_dimensions[get_column_letter(index)].width = width
-    sheet.freeze_panes = "A2"
-    sheet.auto_filter.ref = sheet.dimensions
-    sheet.sheet_view.showGridLines = False
+    sheet.auto_filter.ref = f"A1:L{row_count + 1}"
     temporary = destination.with_name(
         f".{destination.stem}.{uuid.uuid4().hex}.tmp{destination.suffix}"
     )

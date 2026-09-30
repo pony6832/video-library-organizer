@@ -28,7 +28,7 @@ def test_catalog_writes_visible_excel_every_100_videos(tmp_path, monkeypatch):
     assert rows_at_write == [100, 200, 205]
     book = load_workbook(result.workspace.excel_path, read_only=True)
     try:
-        assert book.active.max_row == 206
+        assert sum(1 for _ in book.active.iter_rows(values_only=True)) == 206
     finally:
         book.close()
 

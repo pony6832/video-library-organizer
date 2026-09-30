@@ -260,6 +260,21 @@ def test_local_analyzer_uses_readable_strict_schema_prompt(tmp_path: Path) -> No
     )
 
 
+@pytest.mark.parametrize('model, disable_thinking', [
+    ('qwen3.5:9b', True), ('Qwen3-vl:8b-instruct', False),
+])
+def test_local_batch_model_uses_supported_thinking_option(tmp_path, model, disable_thinking):
+    source = tmp_path / 'frame.jpg'
+    source.write_bytes(b'frame')
+    calls = []
+    def runner(arguments, **kwargs):
+        calls.append(arguments)
+        return subprocess.CompletedProcess(arguments, 0, stdout=json.dumps({
+            'description': '紅色圓形', 'highlights': ['圓形'], 'keywords': ['紅色']}), stderr='')
+    LocalAnalyzer(model=model, runner=runner).analyze_frames([source])
+    assert ('--think=false' in calls[0]) is disable_thinking
+
+
 @pytest.mark.parametrize(
     "payload",
     [
