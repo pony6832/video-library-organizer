@@ -24,6 +24,7 @@ OutputBaseFilename=MediaCatalogVideoDesktop-Setup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
+SetupIconFile=app.ico
 UninstallDisplayIcon={app}\MediaCatalogVideoDesktop.exe
 CreateUninstallRegKey=not IsQAMode
 UsePreviousAppDir=not IsQAMode

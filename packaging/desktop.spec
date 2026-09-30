@@ -15,7 +15,8 @@ base = Path(sys.base_prefix)
 datas += [(str(base / 'LICENSE.txt'), 'licenses/Python'),
           (str(project / 'packaging/licenses/Tcl-license.terms'), 'licenses/Tcl'),
           (str(base / 'tcl/tk8.6/license.terms'), 'licenses/Tk'),
-          (str(project / '.tools/build/inno/license.txt'), 'licenses/InnoSetup')]
+          (str(project / '.tools/build/inno/license.txt'), 'licenses/InnoSetup'),
+          (str(project / 'src/media_catalog/assets/app.ico'), 'media_catalog/assets')]
 a = Analysis([str(project / 'packaging/desktop_entry.py')],
     pathex=[str(project / 'src')], datas=datas,
     hiddenimports=['PIL._tkinter_finder'],
@@ -23,5 +24,6 @@ a = Analysis([str(project / 'packaging/desktop_entry.py')],
     noarchive=False)
 pyz = PYZ(a.pure)
 exe = EXE(pyz, a.scripts, [], exclude_binaries=True,
-    name='MediaCatalogVideoDesktop', debug=False, strip=False, upx=False, console=False)
+    name='MediaCatalogVideoDesktop', debug=False, strip=False, upx=False, console=False,
+    icon=str(project / 'packaging/app.ico'))
 coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name='MediaCatalogVideoDesktop')

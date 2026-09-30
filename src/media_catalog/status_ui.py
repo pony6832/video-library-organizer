@@ -265,6 +265,7 @@ class StatusApplication:
         self.closing = False
 
         root.title(self.WINDOW_TITLE)
+        theme.apply_window_icon(root)
         root.configure(bg=theme.BG)
         root.protocol("WM_DELETE_WINDOW", self._on_close)
 

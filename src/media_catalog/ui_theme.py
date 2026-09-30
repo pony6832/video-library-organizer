@@ -90,6 +90,19 @@ def enable_high_dpi() -> None:
         pass
 
 
+def apply_window_icon(root) -> None:
+    """Use the app icon instead of Tk's default feather (window + taskbar)."""
+    from pathlib import Path
+
+    icon = Path(__file__).resolve().parent / "assets" / "app.ico"
+    if not icon.is_file():
+        return
+    try:
+        root.iconbitmap(default=str(icon))
+    except Exception:  # a missing/unsupported icon must never block startup
+        pass
+
+
 def font(size: int = 10, weight: str = "normal") -> tuple[str, int, str]:
     return (FONT, size, weight)
 
