@@ -53,11 +53,17 @@ class MediaWorkspace:
             raise WorkspacePathError("成果目錄不能作為掃描根目錄")
 
         result_root = resolved / RESULT_DIRECTORY_NAME
+        legacy_excel = result_root / "媒體清冊.xlsx"
+        excel_path = (
+            legacy_excel
+            if legacy_excel.exists()
+            else result_root / f"{resolved.name}_媒體清冊.xlsx"
+        )
         return cls(
             root=resolved,
             result_root=result_root,
             database_path=result_root / "catalog.sqlite",
-            excel_path=result_root / "媒體清冊.xlsx",
+            excel_path=excel_path,
             markdown_dir=result_root / "Markdown",
             backup_dir=result_root / "備份",
             index_dir=result_root / "索引",

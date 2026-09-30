@@ -15,7 +15,7 @@ def test_workspace_derives_and_creates_fixed_result_layout(tmp_path: Path) -> No
     assert workspace.root == root.resolve()
     assert workspace.result_root == root.resolve() / "媒體整理成果"
     assert workspace.database_path == workspace.result_root / "catalog.sqlite"
-    assert workspace.excel_path == workspace.result_root / "媒體清冊.xlsx"
+    assert workspace.excel_path == workspace.result_root / "家庭照片影片_媒體清冊.xlsx"
     assert {
         workspace.markdown_dir.name,
         workspace.backup_dir.name,
@@ -24,6 +24,20 @@ def test_workspace_derives_and_creates_fixed_result_layout(tmp_path: Path) -> No
     } == {"Markdown", "備份", "索引", "工作暫存"}
     assert all(path.is_dir() for path in workspace.directories)
     assert not list(workspace.result_root.glob(".write-probe-*"))
+
+
+def test_existing_legacy_workbook_remains_the_active_catalog(tmp_path: Path) -> None:
+    root = tmp_path / "家庭照片影片"
+    result_root = root / "媒體整理成果"
+    result_root.mkdir(parents=True)
+    legacy = result_root / "媒體清冊.xlsx"
+    legacy.write_bytes(b"existing-review-data")
+
+    workspace = MediaWorkspace.from_root(root)
+
+    assert workspace.excel_path == legacy
+    assert legacy.read_bytes() == b"existing-review-data"
+    assert not (result_root / "家庭照片影片_媒體清冊.xlsx").exists()
 
 
 def test_workspace_rejects_result_directory_as_root(tmp_path: Path) -> None:

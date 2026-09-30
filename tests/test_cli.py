@@ -47,7 +47,7 @@ def test_cli_start_prints_machine_readable_ready_marker(
     assert exit_code == 0
     assert "MEDIA_CATALOG_READY" in output
     assert "added=1" in output
-    assert str(root / "媒體整理成果" / "媒體清冊.xlsx") in output
+    assert str(root / "媒體整理成果" / "media_媒體清冊.xlsx") in output
 
 
 def test_cli_reports_invalid_root_without_creating_fallback(
@@ -66,7 +66,7 @@ def test_cli_reports_invalid_root_without_creating_fallback(
 
 def test_catalog_refresh_reports_corrupt_excel_without_overwrite(tmp_path: Path, capsys) -> None:
     root = _catalog_root_with_one_pending_photo(tmp_path)
-    output = root / "媒體整理成果" / "媒體清冊.xlsx"
+    output = root / "媒體整理成果" / "media_媒體清冊.xlsx"
     output.write_bytes(b"damaged-review-data")
     assert main(["start", str(root)]) == 2
     assert "MEDIA_CATALOG_ERROR" in capsys.readouterr().err
@@ -92,7 +92,7 @@ def test_cli_analyze_all_prints_fixed_summary(tmp_path: Path, capsys) -> None:
     assert captured.out.splitlines()[-1].startswith(
         "MEDIA_ANALYSIS_READY mode=auto analyzed=1 failed=0 skipped=0 remaining=0"
     )
-    assert f"catalog={root / '媒體整理成果' / '媒體清冊.xlsx'}" in captured.out
+    assert f"catalog={root / '媒體整理成果' / 'media_媒體清冊.xlsx'}" in captured.out
 
 
 def test_force_cli_passes_mode_and_run_id_to_batch(
