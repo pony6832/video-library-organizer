@@ -37,12 +37,21 @@ try {
     $viewerPin = Get-Content -LiteralPath packaging/viewer.json -Raw -Encoding UTF8 | ConvertFrom-Json
     $viewerDir = Join-Path $work 'viewer'
     New-Item -ItemType Directory -Path $viewerDir | Out-Null
-    foreach ($asset in @(@{ url = $viewerPin.url; sha = $viewerPin.sha256; name = 'VideoLibraryViewer.exe' },
-                         @{ url = $viewerPin.lan_share_url; sha = $viewerPin.lan_share_sha256; name = 'LAN-share.bat' })) {
-        $target = Join-Path $viewerDir $asset.name
-        Invoke-WebRequest -UseBasicParsing -Uri $asset.url -OutFile $target
+    # The viewer repository may be private: download through the signed-in
+    # GitHub CLI when present, otherwise anonymously (TLS 1.2 for PowerShell 5.1).
+    $gh = Get-Command gh -ErrorAction SilentlyContinue
+    foreach ($asset in $viewerPin.assets.PSObject.Properties) {
+        $target = Join-Path $viewerDir $asset.Name
+        if ($gh) {
+            & $gh.Source release download $viewerPin.tag --repo $viewerPin.repo --pattern $asset.Name --dir $viewerDir
+            if ($LASTEXITCODE -ne 0) { throw "Cannot download $($asset.Name) from $($viewerPin.repo) $($viewerPin.tag)" }
+        } else {
+            [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+            Invoke-WebRequest -UseBasicParsing -OutFile $target `
+                -Uri "https://github.com/$($viewerPin.repo)/releases/download/$($viewerPin.tag)/$($asset.Name)"
+        }
         $actual = (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash
-        if ($actual -ne $asset.sha.ToUpperInvariant()) { throw "SHA-256 mismatch for $($asset.name): $actual" }
+        if ($actual -ne $asset.Value.ToUpperInvariant()) { throw "SHA-256 mismatch for $($asset.Name): $actual" }
     }
     & $compiler /Q "/DBundleDir=$bundle" "/DReleaseDir=$release" "/DAppVersion=$appVersion" "/DViewerDir=$viewerDir" packaging/MediaCatalogVideoDesktop.iss
     if ($LASTEXITCODE -ne 0) { throw 'Inno Setup failed' }

@@ -31,7 +31,7 @@ def check_bundled_viewer(installed, fixture, records, env):
     import urllib.request
     pin = json.loads((PROJECT / 'packaging' / 'viewer.json').read_text(encoding='utf-8'))
     viewer = installed / 'viewer' / 'VideoLibraryViewer.exe'
-    assert hashlib.sha256(viewer.read_bytes()).hexdigest() == pin['sha256']
+    assert hashlib.sha256(viewer.read_bytes()).hexdigest() == pin['assets']['VideoLibraryViewer.exe']
     assert (installed / 'viewer' / 'LAN-share.bat').is_file()
     port = 18790
     process = subprocess.Popen([str(viewer), '--port', str(port), '--no-browser', '--import', str(fixture)],
