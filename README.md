@@ -11,11 +11,18 @@
 
 到 [Releases](https://github.com/pony6832/video-library-organizer/releases) 下載 `VideoLibraryOrganizer-<版本>-Setup.exe`，雙擊安裝，不需要 Python 或 Codex。
 
-- 目前版本：**0.3.0 Beta 1**（預覽版，供測試回饋）
+- 目前版本：**0.3.0 Beta 2**（預覽版，供測試回饋）
 - 安裝在目前使用者帳號，不需系統管理員權限；**未數位簽章**，SmartScreen 出現時按「其他資訊」→「仍要執行」。
 - 安裝包不含模型、使用者媒體或 API Key。第一次使用請按右上角「環境設定」→「檢查環境」，
   缺少的工具與約 6.6 GB 本機模型會在你按下「安裝缺少元件」後才下載。
 - 操作說明與限制見 [繁體中文桌面版說明](packaging/README-zh-TW.md)。
+
+## 0.3.0 Beta 2 的主要變更
+
+- **影像圖書館（清冊檢視面板）**：新增 `media_library/` 本機網頁面板，可匯入本程式產生的「媒體清冊」Excel，
+  瀏覽、搜尋、挑選、播放影片，並直接編輯欄位、即時寫回原始 Excel。面板不包含在安裝程式內，
+  請從 Release 下載 `media_library-0.3.0-beta.2.zip`，或改用獨立的 [VideoLibraryViewer](https://github.com/pony6832/video-library-viewer)（免安裝 Python 的 exe 版）。
+- 桌面程式本身與 Beta 1 相同（Beta 1 發布後已包含小螢幕 1366×768 與非中文 Windows 語系的修正）。
 
 ## 0.3.0 Beta 1 的主要變更
 

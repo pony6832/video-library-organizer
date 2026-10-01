@@ -1,9 +1,11 @@
-# Video Library Organizer（影片資料庫整理）— Windows 桌面版 0.3.0 Beta 1
+# Video Library Organizer（影片資料庫整理）— Windows 桌面版 0.3.0 Beta 2
 
 > 測試版：介面全面改版並強化穩定性，請試用後回報問題與建議。
 > 前身為「Media Catalog Video Desktop」0.2.0；安裝時會直接升級舊版並改用新名稱的捷徑（清冊、模型、工具與 Key 都會保留）。
 >
-> 這版的主要變更：
+> Beta 2：桌面程式與 Beta 1 相同；另附「影像圖書館」清冊檢視面板（media_library ZIP，需另行下載）。
+>
+> 0.3.0 的主要變更：
 > - 新介面：上方步驟列標示目前進度，右側「下一步」提示該按什麼；分析方式改為「本機分析／Gemini 雲端強化」兩張選項卡。
 > - 開著 Excel 也能繼續分析，關閉後自動補寫；單一影片失敗不再讓整批被當成當機而重啟。
 > - 重新掃描時略過未變動的檔案，大量影片時速度明顯提升；已刪除或搬走的影片不再反覆重試。
@@ -16,7 +18,7 @@
 
 ## 安裝與使用
 
-1. 執行 VideoLibraryOrganizer-0.3.0-beta.1-Setup.exe，安裝到目前使用者帳號。
+1. 執行 VideoLibraryOrganizer-0.3.0-beta.2-Setup.exe，安裝到目前使用者帳號。
 2. 從桌面或開始功能表「Video Library Organizer」啟動。
 3. 先按右上角「環境設定」，再按「檢查環境」；檢查本身不會下載或分析。
 4. 缺少元件時，經你按下安裝才會下載 FFmpeg、Node.js、Ollama、
