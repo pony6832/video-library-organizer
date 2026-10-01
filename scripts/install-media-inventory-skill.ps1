@@ -1,4 +1,4 @@
-param(
+﻿param(
     [string]$Destination = (Join-Path $env:USERPROFILE '.codex\skills\media-inventory'),
     [string]$ProjectRoot = (Split-Path -Parent $PSScriptRoot)
 )

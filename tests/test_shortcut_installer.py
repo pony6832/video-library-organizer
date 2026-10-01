@@ -5,6 +5,8 @@ import os
 import subprocess
 from pathlib import Path
 
+import pytest
+
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SHORTCUT_SCRIPT = PROJECT_ROOT / "scripts/create-media-catalog-shortcut.ps1"
@@ -68,6 +70,22 @@ def read_shortcut(link_path: Path) -> dict[str, str]:
     return json.loads(result.stdout)
 
 
+def _ansi_code_page_can_encode(text: str) -> bool:
+    import ctypes
+
+    try:
+        text.encode(f"cp{ctypes.windll.kernel32.GetACP()}")
+    except (LookupError, UnicodeEncodeError):
+        return False
+    return True
+
+
+# WScript.Shell saves shortcuts through the ANSI code page, so a Chinese
+# folder name cannot be written on e.g. an English (cp1252) CI runner.
+@pytest.mark.skipif(
+    os.name != "nt" or not _ansi_code_page_can_encode("桌面"),
+    reason="WScript.Shell cannot save .lnk paths outside the ANSI code page",
+)
 def test_shortcut_script_creates_one_credential_free_link_and_updates_in_place(
     tmp_path: Path,
 ) -> None:

@@ -108,3 +108,22 @@ def test_disabled_buttons_look_disabled(tmp_path):
         assert button.cget("bg") == enabled_bg
     finally:
         root.destroy()
+
+
+@isolated_native_tk
+def test_compact_layout_fits_a_768_pixel_screen(tmp_path):
+    import tkinter as tk
+
+    from media_catalog.desktop import DesktopApplication
+
+    DesktopApplication.COMPACT_SCREEN_HEIGHT = 100_000  # force compact mode
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        app = DesktopApplication(root, skill_root=tmp_path, supervisor=Mock(is_busy=False, catalog_process=None))
+        root.update_idletasks()
+        assert app.compact is True
+        # 768 px minus the taskbar and title bar.
+        assert root.winfo_reqheight() <= 690
+    finally:
+        root.destroy()

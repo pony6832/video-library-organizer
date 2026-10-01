@@ -264,8 +264,9 @@ def auto_wrap(label, *, margin: int = 0) -> None:
 class StatTile:
     """Small labelled number, e.g. 影片 128."""
 
-    def __init__(self, tk, parent, title: str, variable, *, background: str = SURFACE_ALT) -> None:
-        self.frame = tk.Frame(parent, bg=background, padx=14, pady=8,
+    def __init__(self, tk, parent, title: str, variable, *, background: str = SURFACE_ALT,
+                 compact: bool = False) -> None:
+        self.frame = tk.Frame(parent, bg=background, padx=14, pady=4 if compact else 8,
                               highlightthickness=1, highlightbackground=DIVIDER)
         tk.Label(self.frame, text=title, bg=background, fg=TEXT_MUTED, font=font(9), anchor="w").pack(fill="x")
         # Fixed width keeps the column from shifting as numbers change.
@@ -343,13 +344,14 @@ class ChoiceCard:
     """A large, clickable radio option with a title and explanation."""
 
     def __init__(self, tk, parent, *, variable, value: str, title: str, description: str,
-                 accent: str = ACCENT, accent_soft: str = ACCENT_SOFT, badge: str = "") -> None:
+                 accent: str = ACCENT, accent_soft: str = ACCENT_SOFT, badge: str = "",
+                 compact: bool = False) -> None:
         self.variable = variable
         self.value = value
         self.accent = accent
         self.accent_soft = accent_soft
         self.enabled = True
-        self.frame = tk.Frame(parent, bg=SURFACE, padx=14, pady=10, highlightthickness=1,
+        self.frame = tk.Frame(parent, bg=SURFACE, padx=14, pady=6 if compact else 10, highlightthickness=1,
                               highlightbackground=BORDER, cursor="hand2")
         top = tk.Frame(self.frame, bg=SURFACE)
         top.pack(fill="x")

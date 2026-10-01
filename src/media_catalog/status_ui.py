@@ -307,6 +307,12 @@ class StatusApplication:
     STEPS = ("選擇資料夾", "建立清冊", "分析媒體", "檢閱成果")
     SOURCE_TITLE = "媒體資料夾"
     DEFAULT_WIDTH = 1060
+    # Below this logical screen height (e.g. 1366x768 laptops) the layout
+    # tightens spacing so the whole window, including the action bar, fits.
+    COMPACT_SCREEN_HEIGHT = 900
+
+    def _pad(self, normal, compact):
+        return compact if self.compact else normal
 
     def _fit_window(self) -> None:
         """Size the window from its content instead of fixed pixels, so the
@@ -324,18 +330,20 @@ class StatusApplication:
 
     def _build_layout(self) -> None:
         tk = self.tk
+        self.compact = self.root.winfo_screenheight() < self.COMPACT_SCREEN_HEIGHT
         theme.configure_ttk(self.ttk, self.root)
         self.root.option_add("*Font", theme.font(10))
 
-        header = tk.Frame(self.root, bg=theme.SURFACE, padx=28, pady=14)
+        header = tk.Frame(self.root, bg=theme.SURFACE, padx=28, pady=self._pad(14, 8))
         header.pack(fill="x")
         tk.Frame(self.root, bg=theme.BORDER, height=1).pack(fill="x")
         titles = tk.Frame(header, bg=theme.SURFACE)
         titles.pack(side="left")
         tk.Label(titles, text=self.APP_TITLE, bg=theme.SURFACE, fg=theme.TEXT,
                  font=theme.font(17, "bold"), anchor="w").pack(anchor="w")
-        tk.Label(titles, text=self.APP_SUBTITLE, bg=theme.SURFACE, fg=theme.TEXT_MUTED,
-                 font=theme.font(9), anchor="w").pack(anchor="w", pady=(2, 0))
+        if not self.compact:
+            tk.Label(titles, text=self.APP_SUBTITLE, bg=theme.SURFACE, fg=theme.TEXT_MUTED,
+                     font=theme.font(9), anchor="w").pack(anchor="w", pady=(2, 0))
         header_right = tk.Frame(header, bg=theme.SURFACE)
         header_right.pack(side="right")
         self._build_header_actions(header_right)
@@ -347,14 +355,14 @@ class StatusApplication:
         footer_wrap = tk.Frame(self.root, bg=theme.SURFACE)
         footer_wrap.pack(fill="x", side="bottom")
         tk.Frame(footer_wrap, bg=theme.BORDER, height=1).pack(fill="x")
-        footer = tk.Frame(footer_wrap, bg=theme.SURFACE, padx=28, pady=12)
+        footer = tk.Frame(footer_wrap, bg=theme.SURFACE, padx=28, pady=self._pad(12, 7))
         footer.pack(fill="x")
         self._build_actions(footer)
 
-        body = tk.Frame(self.root, bg=theme.BG, padx=28, pady=16)
+        body = tk.Frame(self.root, bg=theme.BG, padx=28, pady=self._pad(16, 8))
         body.pack(fill="both", expand=True)
         self.stepper = theme.Stepper(tk, body, self.STEPS)
-        self.stepper.frame.pack(anchor="w", pady=(0, 14))
+        self.stepper.frame.pack(anchor="w", pady=(0, self._pad(14, 8)))
         columns = tk.Frame(body, bg=theme.BG)
         columns.pack(fill="both", expand=True)
         columns.columnconfigure(0, minsize=420)
@@ -377,12 +385,12 @@ class StatusApplication:
 
     def _build_source_card(self, parent) -> None:
         tk = self.tk
-        card = theme.card(tk, parent)
+        card = theme.card(tk, parent, padding=self._pad(18, 12))
         card.pack(fill="x")
         theme.section_title(tk, card, self.SOURCE_TITLE)
         path_box = tk.Frame(card, bg=theme.SURFACE_ALT, padx=12, pady=8,
                             highlightthickness=1, highlightbackground=theme.DIVIDER)
-        path_box.pack(fill="x", pady=(10, 10))
+        path_box.pack(fill="x", pady=self._pad((10, 10), (6, 6)))
         # Fixed two-line height: a long path must not push the layout around.
         tk.Label(path_box, textvariable=self.path_var, bg=theme.SURFACE_ALT, fg=theme.TEXT,
                  font=theme.font(10), anchor="nw", justify="left", wraplength=360,
@@ -390,26 +398,26 @@ class StatusApplication:
         self.select_button = self._button(card, "選擇資料夾…", self._choose_folder)
         self.select_button.pack(anchor="w")
         tiles = tk.Frame(card, bg=theme.SURFACE)
-        tiles.pack(fill="x", pady=(12, 0))
+        tiles.pack(fill="x", pady=(self._pad(12, 8), 0))
         for index, (title, variable) in enumerate(self._source_tiles()):
-            tile = theme.StatTile(tk, tiles, title, variable)
+            tile = theme.StatTile(tk, tiles, title, variable, compact=self.compact)
             tile.frame.grid(row=0, column=index, sticky="ew", padx=(0 if index == 0 else 8, 0))
             tiles.columnconfigure(index, weight=1, uniform="tiles")
 
     def _build_mode_card(self, parent) -> None:
         tk = self.tk
-        card = theme.card(tk, parent)
-        card.pack(fill="x", pady=(14, 0))
+        card = theme.card(tk, parent, padding=self._pad(18, 12))
+        card.pack(fill="x", pady=(self._pad(14, 8), 0))
         theme.section_title(tk, card, "分析方式")
         self.local_choice = theme.ChoiceCard(
             tk, card, variable=self.mode_var, value=MODE_LOCAL, title="本機分析",
-            description=self._local_mode_description(), badge="免費",
+            description=self._local_mode_description(), badge="免費", compact=self.compact,
         )
-        self.local_choice.frame.pack(fill="x", pady=(10, 8))
+        self.local_choice.frame.pack(fill="x", pady=self._pad((10, 8), (6, 5)))
         self.gemini_choice = theme.ChoiceCard(
             tk, card, variable=self.mode_var, value=MODE_GEMINI, title="Gemini 雲端強化",
             description="重新分析未審核項目；只上傳縮小預覽圖，開始前會先顯示請求上限並請你確認。",
-            accent=theme.WARN, accent_soft=theme.WARN_SOFT, badge="可能計費",
+            accent=theme.WARN, accent_soft=theme.WARN_SOFT, badge="可能計費", compact=self.compact,
         )
         self.gemini_choice.frame.pack(fill="x")
         self._build_gemini_options(card)
@@ -425,13 +433,13 @@ class StatusApplication:
 
     def _build_progress_card(self, parent) -> None:
         tk = self.tk
-        card = theme.card(tk, parent)
+        card = theme.card(tk, parent, padding=self._pad(18, 12))
         card.pack(fill="both", expand=True)
         theme.section_title(tk, card, "分析進度")
         headline = tk.Frame(card, bg=theme.SURFACE)
         headline.pack(fill="x", pady=(8, 0))
         self.percent_label = tk.Label(headline, textvariable=self.percent_var, bg=theme.SURFACE,
-                                      fg=theme.TEXT, font=theme.font(30, "bold"))
+                                      fg=theme.TEXT, font=theme.font(self._pad(30, 24), "bold"))
         self.percent_label.pack(side="left")
         tk.Label(headline, textvariable=self.detail_var, bg=theme.SURFACE, fg=theme.TEXT_MUTED,
                  font=theme.font(10), anchor="w", justify="left", wraplength=360
