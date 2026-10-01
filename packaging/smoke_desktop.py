@@ -52,7 +52,7 @@ def main():
                             creationflags=subprocess.CREATE_NO_WINDOW, timeout=60)
     assert result.returncode in (0, 1) and 'checks' in json.loads(diagnostic.read_text(encoding='utf-8'))
     installed = qa / 'installed'
-    run([release / 'MediaCatalogVideoDesktop-Setup.exe', '/VERYSILENT', '/SUPPRESSMSGBOXES',
+    run([release / 'VideoLibraryOrganizer-Setup.exe', '/VERYSILENT', '/SUPPRESSMSGBOXES',
          '/NORESTART', '/QAINSTALL=1', '/NOICONS', '/TASKS=', f'/DIR={installed}',
          f'/LOG={qa / "install.log"}'], env=env)
     exe = installed / 'MediaCatalogVideoDesktop.exe'

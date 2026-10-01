@@ -1,20 +1,57 @@
-# Media Catalog A+ Stable
+# Video Library Organizer（影片資料庫整理）
 
-## Windows 影片專用桌面版 0.2.0
+為本機影片建立可搜尋的清冊與內容摘要的 Windows 桌面程式。掃描指定資料夾，以本機視覺模型（Qwen3.5 9B，透過 Ollama）
+描述每支影片的內容、重點與關鍵字，可選擇用 Gemini 補強；結果寫入來源資料夾下的 `媒體整理成果`（SQLite ＋ Excel）。
+原始影片不會被移動、改名或修改 metadata。
 
-從 [最新安裝版](https://github.com/pony6832/media-catalog-a-plus-stable/releases/latest) 下載 `MediaCatalogVideoDesktop-Setup.exe`，雙擊安裝，不需要 Codex 或 Python。
-目前版本為 0.2.0，採用 Qwen3.5 9B Q4_K_M 本機辨識，Gemini 自動選擇帳號可用的最新正式 Flash。
-新增本片段進度、Key 檢查、每 100 筆 Excel 更新，以及以資料夾名稱作清冊前綴；來源與驗證見 [發行紀錄](docs/desktop-release-20260930-v020.md)。
-此獨立產品僅處理影片，與下方舊版 A+ Skill 並存、不覆蓋。
-安裝後先按右上角「環境設定」，按安裝下載缺少的工具與約 6.6 GB 本機模型。
-此輕量安裝包不含模型、使用者媒體或 API Key；**未數位簽章**，可能觸發 SmartScreen。
-完整操作及限制見 [繁體中文桌面版說明](packaging/README-zh-TW.md)。
+> 本倉庫是 [media-catalog-a-plus-stable](https://github.com/pony6832/media-catalog-a-plus-stable) 的後繼版本，保留完整開發歷史。
+> 舊名稱「Media Catalog Video Desktop」0.2.0 的使用者可直接安裝本版升級。
 
-建置工具備妥後，以 `powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-desktop.ps1` 重建。
-每次使用全新時間戳版本目錄；已有 BuildId 將拒絕覆寫，不自動刪除任何舊版本。
-產物包含 onedir 程式資料夾、每使用者安裝器及 `SHA256.json`；搬移可攜版時需保留整個程式資料夾。
+## 下載
 
-本專案會掃描指定的本機照片／影片資料夾，將 SQLite、Excel 清冊與分析暫存集中寫入來源根目錄下的 `媒體整理成果`。來源媒體保持原位，不移動、不改名、不修改 metadata。
+到 [Releases](https://github.com/pony6832/video-library-organizer/releases) 下載 `VideoLibraryOrganizer-<版本>-Setup.exe`，雙擊安裝，不需要 Python 或 Codex。
+
+- 目前版本：**0.3.0 Beta 1**（預覽版，供測試回饋）
+- 安裝在目前使用者帳號，不需系統管理員權限；**未數位簽章**，SmartScreen 出現時按「其他資訊」→「仍要執行」。
+- 安裝包不含模型、使用者媒體或 API Key。第一次使用請按右上角「環境設定」→「檢查環境」，
+  缺少的工具與約 6.6 GB 本機模型會在你按下「安裝缺少元件」後才下載。
+- 操作說明與限制見 [繁體中文桌面版說明](packaging/README-zh-TW.md)。
+
+## 0.3.0 Beta 1 的主要變更
+
+- **新介面**：步驟列（選擇資料夾 → 建立清冊 → 分析 → 檢閱成果）、「下一步」提示、分析方式選項卡
+  （本機分析／Gemini 雲端強化，付費選項以琥珀色標示）、有顏色區分的狀態標籤、支援高 DPI。
+- **穩定性**：Excel 開著也能繼續分析並於關閉後補寫；單一影片失敗不再被當成當機重啟；
+  逾時會一併結束 ffmpeg／node 子程序；UI 不會因資料庫忙碌而凍結。
+- **大型資料夾**：重新掃描略過未變動的檔案；進度統計與 Excel 同步不再隨筆數平方成長；
+  快剪影片片段數有上限；已刪除、搬走或被取代的影片標為「來源已移除」不再重試，搬移的檔案沿用既有分析。
+- **雲端與安全**：Gemini 錯誤分類（額度、Key、內容封鎖、伺服器），永久錯誤不重試、429 依建議退避；
+  API Key 不再傳給 npm／winget／ffmpeg 等外部工具。
+- **開發**：GitHub Actions CI（ruff ＋ pytest）、版本號單一來源（`pyproject.toml`）。
+
+## 開發與建置
+
+```powershell
+uv venv .venv --python 3.11
+uv pip install --python .venv\Scripts\python.exe -e ".[test]" pyinstaller==6.22.3
+.venv\Scripts\python.exe -m pytest -q --ignore=tests/integration
+```
+
+建置安裝包需要 Inno Setup 6（可攜模式放在 `.tools\build\inno`），然後執行：
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/build-desktop.ps1 -BuildId <新的ID>
+.venv\Scripts\python.exe packaging/smoke_desktop.py dist\<新的ID> --qa-id <新的ID> --analyze --uninstall
+```
+
+每次建置使用新的 BuildId，不覆寫舊版本；產物包含 onedir 程式資料夾、安裝程式及 `SHA256.json`。
+驗收腳本以 QA 模式安裝（不建立捷徑、不寫入解除安裝紀錄），實際建立清冊與本機分析後再解除安裝。
+
+---
+
+# 舊版：Media Catalog A+ Skill（Codex）
+
+以下為隨倉庫保留的 Codex Skill 版本說明。
 
 ## 換電腦安裝
 

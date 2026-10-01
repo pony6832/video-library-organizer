@@ -10,17 +10,19 @@
 
 [Setup]
 AppId={code:GetAppId}
-AppName=Media Catalog Video Desktop
+AppName=Video Library Organizer
+AppVerName=Video Library Organizer {#AppVersion}
 AppVersion={#AppVersion}
-AppPublisher=Media Catalog Project
+AppPublisher=Video Library Organizer Project
+AppPublisherURL=https://github.com/pony6832/video-library-organizer
 DefaultDirName={localappdata}\Programs\MediaCatalogVideoDesktop
-DefaultGroupName=Media Catalog Video Desktop
+DefaultGroupName=Video Library Organizer
 DisableProgramGroupPage=yes
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 OutputDir={#ReleaseDir}
-OutputBaseFilename=MediaCatalogVideoDesktop-Setup
+OutputBaseFilename=VideoLibraryOrganizer-Setup
 Compression=lzma2
 SolidCompression=yes
 WizardStyle=modern
@@ -37,15 +39,23 @@ InfoBeforeFile=README-zh-TW.md
 [Tasks]
 Name: "desktopicon"; Description: "Create desktop shortcut"; Flags: checkedonce; Check: not IsQAMode
 
+[InstallDelete]
+; The product was renamed from "Media Catalog Video Desktop"; drop the old
+; shortcuts so upgraded machines do not show two icons. Same AppId and exe,
+; so the upgrade still happens in place. Never touched in QA installs.
+Type: files; Name: "{autodesktop}\Media Catalog Video Desktop.lnk"; Check: not IsQAMode
+Type: files; Name: "{autoprograms}\Media Catalog Video Desktop\Media Catalog Video Desktop.lnk"; Check: not IsQAMode
+Type: dirifempty; Name: "{autoprograms}\Media Catalog Video Desktop"; Check: not IsQAMode
+
 [Files]
 Source: "{#BundleDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
-Name: "{group}\Media Catalog Video Desktop"; Filename: "{app}\MediaCatalogVideoDesktop.exe"; Check: not IsQAMode
-Name: "{autodesktop}\Media Catalog Video Desktop"; Filename: "{app}\MediaCatalogVideoDesktop.exe"; Tasks: desktopicon; Check: not IsQAMode
+Name: "{group}\Video Library Organizer"; Filename: "{app}\MediaCatalogVideoDesktop.exe"; Check: not IsQAMode
+Name: "{autodesktop}\Video Library Organizer"; Filename: "{app}\MediaCatalogVideoDesktop.exe"; Tasks: desktopicon; Check: not IsQAMode
 
 [Run]
-Filename: "{app}\MediaCatalogVideoDesktop.exe"; Description: "Launch Media Catalog Video Desktop"; Flags: nowait postinstall skipifsilent; Check: not IsQAMode
+Filename: "{app}\MediaCatalogVideoDesktop.exe"; Description: "Launch Video Library Organizer"; Flags: nowait postinstall skipifsilent; Check: not IsQAMode
 
 [Code]
 function IsQAMode: Boolean;
