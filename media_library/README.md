@@ -68,4 +68,4 @@ data/cache/       縮圖、預覽格、代理檔快取（可放心刪除，需�
 ```
 
 ## 與 Video Library Organizer 一起使用時
-Organizer 批次結束時會從它自己的 SQLite 重建 Excel。如果用面板修改清冊後，又用 Organizer 對同一份清冊重新執行分析，面板寫入的修改可能會被覆蓋。建議等 Organizer 分析完成後再進行編輯；需要時可從 `data\backups\` 取回修改前的備份。
+Organizer 0.3.0 Beta 3 起，重建 Excel 時會保留人工修改：在面板或 Excel 中改過的「狀態」「內容描述」「重點」「關鍵字」「拍攝時間」，以及自行新增的欄位（例如挑選、評等、備註、自訂欄位），即使影片重新分析也以人工修改為準。檔名、完整路徑、媒體類型、處理時間、Markdown／備份路徑、錯誤原因仍由 Organizer 產生，面板編輯這些欄位時會顯示提醒；清空的儲存格會由分析結果補回。比對依據是清冊中的隱藏工作表「_organizer_baseline」，請勿刪除。舊版 Organizer（0.3.0 Beta 2 以前）仍會覆蓋面板的修改，需要時可從 `data\backups\` 取回修改前的備份。

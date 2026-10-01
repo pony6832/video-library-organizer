@@ -15,7 +15,7 @@ let LABEL = {
   highlights: '重點', keywords: '關鍵字', shot_time: '拍攝時間', processed_time: '處理時間',
   md_path: 'Markdown 路徑', backup_path: '備份路徑', error: '錯誤原因',
 };
-const DEFAULT_STATUSES = ['待確認', '已確認', '需複查', '錯誤'];
+const DEFAULT_STATUSES = ['待確認', '已審核', '已確認', '需複查', '錯誤'];
 const SPRITE_FRAMES = 12;
 
 const S = {
@@ -1139,6 +1139,16 @@ const FIELD_HINT = {
   filename: '只修改清冊內容，不會重新命名實際檔案',
   full_path: '只修改清冊內容，不會搬移實際檔案；修改後面板會以新路徑尋找影片',
 };
+// Video Library Organizer 重新分析時，這些欄位會依實際檔案與分析紀錄重寫；
+// 狀態、內容描述、重點、關鍵字、拍攝時間與自訂欄位的修改則會保留
+const ORGANIZER_OWNED = new Set(['filename', 'full_path', 'media_type', 'processed_time', 'md_path', 'backup_path', 'error']);
+const isOrganizerBatch = b => !!b && ['Markdown 路徑', '備份路徑', '錯誤原因'].every(h => (b.columns || []).includes(h));
+function fieldHint(m, key) {
+  const hints = FIELD_HINT[key] ? [FIELD_HINT[key]] : [];
+  if (ORGANIZER_OWNED.has(key) && isOrganizerBatch(S.batches.find(b => b.id === m.batch_id)))
+    hints.push('此欄位由 Video Library Organizer 產生，重新分析後會恢復原值');
+  return hints.join('；');
+}
 P.editAll = LS.get('editAll', false);
 P.editing = new Set();     // 個別開啟編輯的欄位
 P.newFields = new Map();   // media_id -> Set(新增中的自訂欄位名稱)
@@ -1183,7 +1193,7 @@ function fieldHTML(m, f) {
   return `<div class="field ${editing ? 'editing' : ''}" data-fkey="${esc(f.key)}">
     <div class="k"><span>${esc(f.label)}</span><span class="fk-act"><span class="saved">✓ 已儲存</span>${copy}${act}</span></div>
     ${editing ? editorHTML(f.key, v) : viewHTML(f.key, v)}
-    ${editing && FIELD_HINT[f.key] ? `<div class="hint">⚠ ${FIELD_HINT[f.key]}</div>` : ''}
+    ${editing && fieldHint(m, f.key) ? `<div class="hint">⚠ ${fieldHint(m, f.key)}</div>` : ''}
   </div>`;
 }
 

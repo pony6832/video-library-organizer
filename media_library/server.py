@@ -214,6 +214,8 @@ def _import_wb(wb, source_name, source_path, only_batch):
     fields = list(COLUMN_MAP.values())
     with _db_lock, db() as c:
         for ws in wb.worksheets:
+            if ws.sheet_state != "visible":  # 例如 Organizer 的隱藏比對表
+                continue
             rows = ws.iter_rows(values_only=True)
             header, header_row = None, 0
             for r in rows:  # 找到含「完整路徑」或「檔名」的標題列

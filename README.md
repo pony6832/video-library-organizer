@@ -11,11 +11,17 @@
 
 到 [Releases](https://github.com/pony6832/video-library-organizer/releases) 下載 `VideoLibraryOrganizer-<版本>-Setup.exe`，雙擊安裝，不需要 Python 或 Codex。
 
-- 目前版本：**0.3.0 Beta 2**（預覽版，供測試回饋）
+- 目前版本：**0.3.0 Beta 3**（預覽版，供測試回饋）
 - 安裝在目前使用者帳號，不需系統管理員權限；**未數位簽章**，SmartScreen 出現時按「其他資訊」→「仍要執行」。
 - 安裝包不含模型、使用者媒體或 API Key。第一次使用請按右上角「環境設定」→「檢查環境」，
   缺少的工具與約 6.6 GB 本機模型會在你按下「安裝缺少元件」後才下載。
 - 操作說明與限制見 [繁體中文桌面版說明](packaging/README-zh-TW.md)。
+
+## 0.3.0 Beta 3 的主要變更
+
+- **人工修改不再被覆蓋**：重建 Excel 時，保留在 Excel 或影像圖書館面板中改過的狀態、內容描述、重點、關鍵字、拍攝時間，
+  以及自行新增的欄位（挑選、評等、備註、自訂欄位）；未修改的欄位照常更新為最新分析結果。
+- 重建途中若有其他程式（例如面板）存檔，會重新讀取後再寫入，不會蓋掉剛寫入的修改。
 
 ## 0.3.0 Beta 2 的主要變更
 
@@ -123,4 +129,4 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-media-inve
 
 `media_library/` 是一個本機網頁面板，可匯入本程式產生的「媒體清冊」Excel，像影像圖書館的總目錄一樣瀏覽、搜尋、挑選和播放影片。清冊的每個欄位都能直接編輯，修改會即時寫回原始 Excel。啟動方式與功能說明見 [media_library/README.md](media_library/README.md)。
 
-> 注意：本程式批次結束時會從 SQLite 重建 Excel。若用面板改過某份清冊後，又用本程式對同一份清冊重新執行分析，面板寫進 Excel 的修改可能會被覆蓋。面板第一次寫入前，會先把清冊備份到 `media_library/data/backups/`。
+> Organizer 0.3.0 Beta 3 起，重建 Excel 時會保留人工修改：在面板或 Excel 中改過的「狀態」「內容描述」「重點」「關鍵字」「拍攝時間」，以及自行新增的欄位（例如挑選、評等、備註、自訂欄位），即使影片重新分析也以人工修改為準。檔名、完整路徑、媒體類型、處理時間、Markdown／備份路徑、錯誤原因仍由 Organizer 產生；清空的儲存格會由分析結果補回。比對依據是清冊中的隱藏工作表「_organizer_baseline」，請勿刪除。面板第一次寫入前，會先把清冊備份到 `media_library/data/backups/`。

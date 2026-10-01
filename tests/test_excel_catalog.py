@@ -1,4 +1,5 @@
 import os
+from itertools import zip_longest
 from pathlib import Path
 
 
@@ -274,3 +275,193 @@ def test_review_status_survives_windows_path_case_changes(tmp_path: Path) -> Non
         assert workbook.active.cell(2, 1).value == "已審核"
     finally:
         workbook.close()
+
+
+def _analyzed_record(tmp_path: Path, name: str = "clip.mp4", description: str = "模型描述"):
+    database = CatalogDatabase(tmp_path / "catalog.sqlite")
+    source = tmp_path / name
+    source.write_bytes(b"clip")
+    record = database.upsert_discovered(source, name, "video/mp4")
+    analyzed = database.save_analysis(
+        record.id, description=description, highlights=("重點一",), keywords=("關鍵字",)
+    )
+    return database, analyzed
+
+
+def _edit_cells(output: Path, **cells) -> None:
+    workbook = load_workbook(output)
+    sheet = workbook["媒體清冊"]
+    headers = [cell.value for cell in sheet[1]]
+    for header, value in cells.items():
+        if header not in headers:
+            headers.append(header)
+            sheet.cell(1, len(headers)).value = header
+        sheet.cell(2, headers.index(header) + 1).value = value
+    workbook.save(output)
+    workbook.close()
+
+
+def _row(output: Path) -> dict:
+    workbook = load_workbook(output, read_only=True)
+    try:
+        rows = list(workbook["媒體清冊"].iter_rows(values_only=True))
+    finally:
+        workbook.close()
+    return dict(zip_longest(rows[0], rows[1]))
+
+
+def test_hand_edits_survive_rebuild_and_baseline_sheet_is_hidden(tmp_path: Path) -> None:
+    from media_catalog.excel_catalog import BASELINE_SHEET
+
+    _, analyzed = _analyzed_record(tmp_path)
+    output = write_excel([analyzed], tmp_path / "媒體清冊.xlsx")
+    _edit_cells(output, 內容描述="人工修正的描述", 關鍵字="人工、標籤", 拍攝時間="2026-09-01")
+
+    write_excel([analyzed], output)
+    write_excel([analyzed], output)
+
+    row = _row(output)
+    assert row["內容描述"] == "人工修正的描述"
+    assert row["關鍵字"] == "人工、標籤"
+    assert row["拍攝時間"] == "2026-09-01"
+    assert row["重點"] == "重點一"
+    workbook = load_workbook(output)
+    baseline = workbook[BASELINE_SHEET]
+    assert baseline.sheet_state == "hidden"
+    # The media library panel finds catalog sheets by these headers.
+    assert not {"完整路徑", "檔名"} & {cell.value for cell in baseline[1]}
+    workbook.close()
+
+
+def test_new_analysis_updates_untouched_fields_but_not_hand_edits(tmp_path: Path) -> None:
+    database, analyzed = _analyzed_record(tmp_path)
+    output = write_excel([analyzed], tmp_path / "媒體清冊.xlsx")
+    _edit_cells(output, 內容描述="人工修正的描述")
+
+    updated = database.save_analysis(
+        analyzed.id, description="Gemini 新描述", highlights=("新重點",), keywords=("新關鍵字",)
+    )
+    write_excel([updated], output)
+
+    row = _row(output)
+    assert row["內容描述"] == "人工修正的描述"
+    assert row["重點"] == "新重點"
+    assert row["關鍵字"] == "新關鍵字"
+
+
+def test_blank_cells_and_own_status_labels_are_refilled(tmp_path: Path) -> None:
+    _, analyzed = _analyzed_record(tmp_path)
+    output = write_excel([analyzed], tmp_path / "媒體清冊.xlsx")
+    _edit_cells(output, 狀態="處理中", 重點=None)
+
+    write_excel([analyzed], output)
+
+    row = _row(output)
+    assert (row["狀態"], row["重點"]) == ("待確認", "重點一")
+
+
+def test_columns_added_by_people_are_carried_over_by_path(tmp_path: Path) -> None:
+    _, analyzed = _analyzed_record(tmp_path)
+    output = write_excel([analyzed], tmp_path / "媒體清冊.xlsx")
+    _edit_cells(output, 挑選="是", 評等=4, 備註="人工備註")
+
+    write_excel([analyzed], output)
+
+    row = _row(output)
+    assert (row["挑選"], row["評等"], row["備註"]) == ("是", 4, "人工備註")
+    workbook = load_workbook(output)
+    sheet = workbook["媒體清冊"]
+    assert sheet.auto_filter.ref == "A1:O2"
+    assert sheet.cell(2, 15).data_type == "s"
+    workbook.close()
+
+
+def test_legacy_workbook_keeps_edits_made_after_the_last_analysis(tmp_path: Path) -> None:
+    from media_catalog.excel_catalog import BASELINE_SHEET
+
+    database, analyzed = _analyzed_record(tmp_path)
+    output = write_excel([analyzed], tmp_path / "媒體清冊.xlsx")
+    workbook = load_workbook(output)
+    del workbook[BASELINE_SHEET]  # as written by 0.3.0 Beta 1 and earlier
+    workbook["媒體清冊"].cell(2, 5).value = "人工修正的描述"
+    workbook.save(output)
+    workbook.close()
+
+    write_excel([analyzed], output)
+
+    assert _row(output)["內容描述"] == "人工修正的描述"
+
+
+def test_legacy_workbook_yields_to_analysis_newer_than_the_file(tmp_path: Path) -> None:
+    from media_catalog.excel_catalog import BASELINE_SHEET
+
+    database, analyzed = _analyzed_record(tmp_path)
+    output = write_excel([analyzed], tmp_path / "媒體清冊.xlsx")
+    workbook = load_workbook(output)
+    del workbook[BASELINE_SHEET]
+    workbook.save(output)
+    workbook.close()
+    old = output.stat().st_mtime - 3600
+    os.utime(output, (old, old))
+
+    updated = database.save_analysis(
+        analyzed.id, description="Gemini 新描述", highlights=("新重點",), keywords=("新關鍵字",)
+    )
+    write_excel([updated], output)
+
+    assert _row(output)["內容描述"] == "Gemini 新描述"
+
+
+def test_edit_saved_during_rebuild_is_not_lost(tmp_path: Path, monkeypatch) -> None:
+    from media_catalog import excel_catalog
+
+    _, analyzed = _analyzed_record(tmp_path)
+    output = write_excel([analyzed], tmp_path / "媒體清冊.xlsx")
+    original = excel_catalog._read_existing
+    calls = []
+
+    def read_then_edit(source):
+        existing = original(source)
+        calls.append(source)
+        if len(calls) == 1:
+            _edit_cells(output, 內容描述="重建途中的人工修改")
+            os.utime(output, ns=(existing.stamp[0] + 10**9, existing.stamp[0] + 10**9))
+        return existing
+
+    monkeypatch.setattr(excel_catalog, "_read_existing", read_then_edit)
+    write_excel([analyzed], output)
+
+    assert len(calls) == 2
+    assert _row(output)["內容描述"] == "重建途中的人工修改"
+
+
+def test_status_set_by_hand_survives_until_changed_again(tmp_path: Path) -> None:
+    database, analyzed = _analyzed_record(tmp_path)
+    output = write_excel([analyzed], tmp_path / "媒體清冊.xlsx")
+    _edit_cells(output, 狀態="需複查")
+
+    from media_catalog.models import Status
+
+    completed = database.set_status(analyzed.id, Status.COMPLETED)
+    write_excel([completed], output)
+    assert _row(output)["狀態"] == "需複查"
+
+    _edit_cells(output, 狀態="已審核")
+    write_excel([completed], output)
+    assert _row(output)["狀態"] == "已審核"
+    assert read_reviewed_paths(output) == {str(completed.path.resolve())}
+
+
+def test_status_follows_analysis_when_not_edited(tmp_path: Path) -> None:
+    database = CatalogDatabase(tmp_path / "catalog.sqlite")
+    source = tmp_path / "clip.mp4"
+    source.write_bytes(b"clip")
+    pending = database.upsert_discovered(source, "clip", "video/mp4")
+    output = write_excel([pending], tmp_path / "媒體清冊.xlsx")
+    assert _row(output)["狀態"] == "待處理"
+
+    analyzed = database.save_analysis(
+        pending.id, description="描述", highlights=("重點",), keywords=("關鍵字",)
+    )
+    write_excel([analyzed], output)
+    assert _row(output)["狀態"] == "待確認"
