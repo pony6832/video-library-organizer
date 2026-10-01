@@ -11,11 +11,16 @@
 
 到 [Releases](https://github.com/pony6832/video-library-organizer/releases) 下載 `VideoLibraryOrganizer-<版本>-Setup.exe`，雙擊安裝，不需要 Python 或 Codex。
 
-- 目前版本：**0.3.0 Beta 3**（預覽版，供測試回饋）
+- 目前版本：**0.3.0 Beta 4**（預覽版，供測試回饋）
 - 安裝在目前使用者帳號，不需系統管理員權限；**未數位簽章**，SmartScreen 出現時按「其他資訊」→「仍要執行」。
 - 安裝包不含模型、使用者媒體或 API Key。第一次使用請按右上角「環境設定」→「檢查環境」，
   缺少的工具與約 6.6 GB 本機模型會在你按下「安裝缺少元件」後才下載。
 - 操作說明與限制見 [繁體中文桌面版說明](packaging/README-zh-TW.md)。
+
+## 0.3.0 Beta 4 的主要變更
+
+- 配合 VideoLibraryViewer 1.3.0 直接讀取分析資料庫：面板會即時顯示 Excel 還沒寫入的新影片；
+  若在那時就修改了它們，面板新增到 Excel 的列，其中的人工修改在重建 Excel 時也會保留。
 
 ## 0.3.0 Beta 3 的主要變更
 
@@ -127,6 +132,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-media-inve
 
 ## 影像圖書館（清冊檢視面板）
 
-清冊檢視面板已獨立為 [VideoLibraryViewer](https://github.com/pony6832/video-library-viewer)，程式碼只在那個倉庫維護（本倉庫 0.3.0 Beta 2～3 曾附的 `media_library/` 已移除）。它可匯入本程式產生的「媒體清冊」Excel，像影像圖書館的總目錄一樣瀏覽、搜尋、挑選和播放影片；清冊的每個欄位都能直接編輯，修改會即時寫回原始 Excel。到它的 [Releases](https://github.com/pony6832/video-library-viewer/releases) 下載免安裝的 `VideoLibraryViewer.exe`（不需要 Python），請使用 1.2.0 以上版本。
+清冊檢視面板已獨立為 [VideoLibraryViewer](https://github.com/pony6832/video-library-viewer)，程式碼只在那個倉庫維護（本倉庫 0.3.0 Beta 2～3 曾附的 `media_library/` 已移除）。它可匯入本程式產生的「媒體清冊」Excel，像影像圖書館的總目錄一樣瀏覽、搜尋、挑選和播放影片；清冊的每個欄位都能直接編輯，修改會即時寫回原始 Excel。到它的 [Releases](https://github.com/pony6832/video-library-viewer/releases) 下載免安裝的 `VideoLibraryViewer.exe`（不需要 Python），請使用 1.3.0 以上版本：匯入時輸入影片資料夾，就會直接連結本程式的分析資料庫，分析結果即時顯示。
 
 > Organizer 0.3.0 Beta 3 起，重建 Excel 時會保留人工修改：在面板或 Excel 中改過的「狀態」「內容描述」「重點」「關鍵字」「拍攝時間」，以及自行新增的欄位（例如挑選、評等、備註、自訂欄位），即使影片重新分析也以人工修改為準。檔名、完整路徑、媒體類型、處理時間、Markdown／備份路徑、錯誤原因仍由 Organizer 產生；清空的儲存格會由分析結果補回。比對依據是清冊中的隱藏工作表「_organizer_baseline」，請勿刪除。面板第一次寫入前，會先把清冊備份到它的 `data\backups\` 資料夾。

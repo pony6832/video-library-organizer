@@ -191,6 +191,8 @@ class _ExistingCatalog:
     manual: dict[str, dict[str, str | None]] = field(default_factory=dict)
     # path key -> {header: text} of finished rows in a workbook without baseline.
     legacy: dict[str, dict[str, str | None]] = field(default_factory=dict)
+    # path key -> {header: text} of filled cells in rows we did not write.
+    foreign: dict[str, dict[str, str | None]] = field(default_factory=dict)
     extra_headers: list[str] = field(default_factory=list)
     extra_values: dict[str, dict[str, object]] = field(default_factory=dict)
 
@@ -247,18 +249,23 @@ def _read_existing(source: Path) -> _ExistingCatalog:
                 header: _cell_text(row[headers[header]]) if len(row) > headers[header] else None
                 for _, header in editable
             }
-            if baseline is not None and key in baseline:
+            if baseline is not None:
                 # Blank cells and our own status labels are left over from an
                 # interrupted run, not edits; the catalog fills them in again.
+                # A row missing from the baseline was not written by us (the
+                # media library panel appends rows for videos it shows before
+                # our next rebuild), so its filled cells are compared with the
+                # catalog instead.
+                written = baseline.get(key)
                 edited = {
                     header: cells[header]
                     for position, header in editable
                     if cells[header] is not None
-                    and cells[header] != baseline[key][position]
+                    and (written is None or cells[header] != written[position])
                     and not (header == "狀態" and cells[header] in _OWN_STATUS_LABELS)
                 }
                 if edited:
-                    existing.manual[key] = edited
+                    (existing.manual if written is not None else existing.foreign)[key] = edited
             elif status in _FINISHED_LABELS:
                 # Status labels change as analysis runs; only content counts.
                 existing.legacy[key] = {
@@ -296,6 +303,12 @@ def _hand_edits(
 ) -> dict[str, str | None]:
     if key in existing.manual:
         return existing.manual[key]
+    if key in existing.foreign:
+        return {
+            header: value
+            for header, value in existing.foreign[key].items()
+            if value != generated[header]
+        }
     legacy = existing.legacy.get(key)
     if not legacy:
         return {}

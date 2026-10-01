@@ -465,3 +465,38 @@ def test_status_follows_analysis_when_not_edited(tmp_path: Path) -> None:
     )
     write_excel([analyzed], output)
     assert _row(output)["狀態"] == "待確認"
+
+
+def test_row_appended_by_another_program_keeps_its_edits(tmp_path: Path) -> None:
+    database, first = _analyzed_record(tmp_path, "a.mp4")
+    output = write_excel([first], tmp_path / "媒體清冊.xlsx")
+    second_path = tmp_path / "b.mp4"
+    second_path.write_bytes(b"clip")
+    second = database.save_analysis(
+        database.upsert_discovered(second_path, "b", "video/mp4").id,
+        description="模型描述 b", highlights=("重點 b",), keywords=("關鍵字 b",),
+    )
+    # The media library panel appends a row for a video it already shows.
+    workbook = load_workbook(output)
+    sheet = workbook["媒體清冊"]
+    sheet.append(["已確認", "b.mp4", str(second_path.resolve()), "影片 (MP4)", "人工描述 b", "重點 b", "關鍵字 b"])
+    workbook.save(output)
+    workbook.close()
+
+    write_excel([first, second], output)
+
+    workbook = load_workbook(output, read_only=True)
+    rows = {row[2]: row for row in workbook["媒體清冊"].iter_rows(min_row=2, values_only=True)}
+    workbook.close()
+    assert len(rows) == 2
+    row = rows[str(second_path.resolve())]
+    assert (row[0], row[4], row[5]) == ("已確認", "人工描述 b", "重點 b")
+
+    # Once we have written the row, later analysis updates the untouched cells.
+    updated = database.save_analysis(second.id, description="新描述", highlights=("新重點",), keywords=("新",))
+    write_excel([first, updated], output)
+    workbook = load_workbook(output, read_only=True)
+    rows = {row[2]: row for row in workbook["媒體清冊"].iter_rows(min_row=2, values_only=True)}
+    workbook.close()
+    row = rows[str(second_path.resolve())]
+    assert (row[0], row[4], row[5]) == ("已確認", "人工描述 b", "新重點")
