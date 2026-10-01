@@ -21,6 +21,7 @@ from .force_gemini import (
 )
 from .run_state import AnalysisRun
 from .supervisor import SupervisorSnapshot, WorkerSupervisor
+from .viewer_launcher import VIEWER_DOWNLOAD_URL, ViewerNotInstalled, open_viewer
 from .workspace import MediaWorkspace, WorkspacePathError
 
 
@@ -498,6 +499,8 @@ class StatusApplication:
         self.excel_button = self._button(footer, "開啟 Excel 清冊",
                                          lambda: self._open_workspace_path("excel"))
         self.excel_button.pack(side="right", padx=(0, 10))
+        self.viewer_button = self._button(footer, "開啟影像圖書館", self._open_viewer)
+        self.viewer_button.pack(side="right", padx=(0, 10))
 
     def _button(self, parent, text: str, command, *, variant: str = "secondary",
                 size: str = "normal"):
@@ -758,6 +761,7 @@ class StatusApplication:
         output_state = "normal" if state.open_outputs_enabled else "disabled"
         self.excel_button.configure(state=output_state)
         self.result_button.configure(state=output_state)
+        self.viewer_button.configure(state=output_state)
 
     def _label_primary_action(self, *, busy: bool, gemini: bool, has_outputs: bool) -> None:
         completed = getattr(self, "_last_stage", 0) == 3
@@ -794,6 +798,21 @@ class StatusApplication:
             self._open(path)
         except OSError as error:
             self.messagebox.showerror("無法開啟", str(error))
+
+    def _open_viewer(self) -> None:
+        if self.workspace is None:
+            self.messagebox.showerror("無法開啟", "尚未選擇資料夾")
+            return
+        try:
+            open_viewer(self.workspace.root)
+        except ViewerNotInstalled:
+            self.messagebox.showerror(
+                "找不到影像圖書館",
+                "這台電腦沒有安裝影像圖書館（VideoLibraryViewer）。請重新安裝本程式，"
+                f"或到 {VIEWER_DOWNLOAD_URL} 下載。",
+            )
+        except OSError as error:
+            self.messagebox.showerror("無法開啟影像圖書館", str(error))
 
     @staticmethod
     def _open(path: Path) -> None:

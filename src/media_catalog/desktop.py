@@ -291,7 +291,7 @@ class DesktopApplication(StatusApplication):
         if setup_window is not None and setup_window.winfo_exists():
             for button in (self.check_button, self.install_button):
                 button.configure(state='disabled' if busy else 'normal')
-        for button in (self.excel_button, self.result_button):
+        for button in (self.excel_button, self.result_button, self.viewer_button):
             button.configure(state='normal' if has_outputs else 'disabled')
 
     def _primary_action(self):

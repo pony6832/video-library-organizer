@@ -127,3 +127,61 @@ def test_compact_layout_fits_a_768_pixel_screen(tmp_path):
         assert root.winfo_reqheight() <= 690
     finally:
         root.destroy()
+
+
+@isolated_native_tk
+def test_open_media_library_button_follows_outputs_and_opens_the_workspace(tmp_path, monkeypatch):
+    import tkinter as tk
+
+    from media_catalog import status_ui
+    from media_catalog.bootstrap import bootstrap_workspace
+    from media_catalog.desktop import DesktopApplication
+
+    opened = []
+    monkeypatch.setattr(status_ui, "open_viewer", lambda folder: opened.append(folder))
+    DesktopApplication.COMPACT_SCREEN_HEIGHT = 100_000  # the narrowest layout
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        app = DesktopApplication(root, skill_root=tmp_path, supervisor=Mock(is_busy=False, catalog_process=None))
+        assert app.viewer_button.cget("text") == "開啟影像圖書館"
+        assert str(app.viewer_button.cget("state")) == "disabled"
+        (tmp_path / "clip.mp4").write_bytes(b"video")
+        app.workspace = bootstrap_workspace(tmp_path).workspace
+        app.media_root = app.workspace.root
+        app._apply_control_state()
+        assert str(app.viewer_button.cget("state")) == "normal"
+        app.viewer_button.invoke()
+        assert opened == [app.workspace.root]
+        root.update_idletasks()
+        assert root.winfo_reqwidth() <= 1366  # still fits a 1366 x 768 screen
+    finally:
+        root.destroy()
+
+
+@isolated_native_tk
+def test_missing_media_library_explains_where_to_get_it(tmp_path, monkeypatch):
+    import tkinter as tk
+
+    from media_catalog import status_ui
+    from media_catalog.bootstrap import bootstrap_workspace
+    from media_catalog.desktop import DesktopApplication
+    from media_catalog.viewer_launcher import ViewerNotInstalled
+
+    def missing(folder):
+        raise ViewerNotInstalled("VideoLibraryViewer.exe")
+
+    monkeypatch.setattr(status_ui, "open_viewer", missing)
+    root = tk.Tk()
+    root.withdraw()
+    try:
+        app = DesktopApplication(root, skill_root=tmp_path, supervisor=Mock(is_busy=False, catalog_process=None))
+        app.messagebox = Mock()
+        (tmp_path / "clip.mp4").write_bytes(b"video")
+        app.workspace = bootstrap_workspace(tmp_path).workspace
+        app._open_viewer()
+        title, message = app.messagebox.showerror.call_args.args
+        assert title == "找不到影像圖書館"
+        assert "github.com/pony6832/video-library-viewer" in message
+    finally:
+        root.destroy()

@@ -32,7 +32,19 @@ try {
     # pyproject.toml is the single source of the release version.
     $appVersion = (& $python -c "import sys, tomllib; print(tomllib.load(open(sys.argv[1], 'rb'))['project']['version'])" (Join-Path $projectRoot 'pyproject.toml')).Trim()
     if ($LASTEXITCODE -ne 0 -or -not $appVersion) { throw 'Cannot read version from pyproject.toml' }
-    & $compiler /Q "/DBundleDir=$bundle" "/DReleaseDir=$release" "/DAppVersion=$appVersion" packaging/MediaCatalogVideoDesktop.iss
+    # The media library panel ships as the pinned VideoLibraryViewer release,
+    # verified by SHA-256; it is installed beside the desktop app in viewer\.
+    $viewerPin = Get-Content -LiteralPath packaging/viewer.json -Raw -Encoding UTF8 | ConvertFrom-Json
+    $viewerDir = Join-Path $work 'viewer'
+    New-Item -ItemType Directory -Path $viewerDir | Out-Null
+    foreach ($asset in @(@{ url = $viewerPin.url; sha = $viewerPin.sha256; name = 'VideoLibraryViewer.exe' },
+                         @{ url = $viewerPin.lan_share_url; sha = $viewerPin.lan_share_sha256; name = 'LAN-share.bat' })) {
+        $target = Join-Path $viewerDir $asset.name
+        Invoke-WebRequest -UseBasicParsing -Uri $asset.url -OutFile $target
+        $actual = (Get-FileHash -LiteralPath $target -Algorithm SHA256).Hash
+        if ($actual -ne $asset.sha.ToUpperInvariant()) { throw "SHA-256 mismatch for $($asset.name): $actual" }
+    }
+    & $compiler /Q "/DBundleDir=$bundle" "/DReleaseDir=$release" "/DAppVersion=$appVersion" "/DViewerDir=$viewerDir" packaging/MediaCatalogVideoDesktop.iss
     if ($LASTEXITCODE -ne 0) { throw 'Inno Setup failed' }
     $files = @(Get-ChildItem -LiteralPath $release -Recurse -File)
     $receipt = @($files | ForEach-Object {

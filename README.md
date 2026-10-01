@@ -11,11 +11,20 @@
 
 到 [Releases](https://github.com/pony6832/video-library-organizer/releases) 下載 `VideoLibraryOrganizer-<版本>-Setup.exe`，雙擊安裝，不需要 Python 或 Codex。
 
-- 目前版本：**0.3.0 Beta 4**（預覽版，供測試回饋）
+- 目前版本：**0.3.0 Beta 5**（預覽版，供測試回饋）
+- 安裝包已內含影像圖書館（VideoLibraryViewer），不必另外下載。
 - 安裝在目前使用者帳號，不需系統管理員權限；**未數位簽章**，SmartScreen 出現時按「其他資訊」→「仍要執行」。
 - 安裝包不含模型、使用者媒體或 API Key。第一次使用請按右上角「環境設定」→「檢查環境」，
   缺少的工具與約 6.6 GB 本機模型會在你按下「安裝缺少元件」後才下載。
 - 操作說明與限制見 [繁體中文桌面版說明](packaging/README-zh-TW.md)。
+
+## 0.3.0 Beta 5 的主要變更
+
+- **一個安裝檔就有兩個工具**：安裝時一併安裝影像圖書館（VideoLibraryViewer 1.4.0），開始功能表會有
+  「Video Library Viewer」與「Video Library Viewer (LAN share)」。
+- **「開啟影像圖書館」按鈕**：在主視窗下方，建立清冊後即可使用。按下後會開啟影像圖書館並直接連結目前的資料夾，
+  分析結果即時顯示；影像圖書館已在執行時，會在原本的視窗中加入這個資料夾。
+- 建置時下載固定版本的 VideoLibraryViewer 並以 SHA-256 驗證（`packaging/viewer.json`）。
 
 ## 0.3.0 Beta 4 的主要變更
 
@@ -132,6 +141,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-media-inve
 
 ## 影像圖書館（清冊檢視面板）
 
-清冊檢視面板已獨立為 [VideoLibraryViewer](https://github.com/pony6832/video-library-viewer)，程式碼只在那個倉庫維護（本倉庫 0.3.0 Beta 2～3 曾附的 `media_library/` 已移除）。它可匯入本程式產生的「媒體清冊」Excel，像影像圖書館的總目錄一樣瀏覽、搜尋、挑選和播放影片；清冊的每個欄位都能直接編輯，修改會即時寫回原始 Excel。到它的 [Releases](https://github.com/pony6832/video-library-viewer/releases) 下載免安裝的 `VideoLibraryViewer.exe`（不需要 Python），請使用 1.3.0 以上版本：匯入時輸入影片資料夾，就會直接連結本程式的分析資料庫，分析結果即時顯示。
+清冊檢視面板是 [VideoLibraryViewer](https://github.com/pony6832/video-library-viewer)，程式碼只在那個倉庫維護（本倉庫 0.3.0 Beta 2～3 曾附的 `media_library/` 已移除）。0.3.0 Beta 5 起安裝包已內含它（安裝在程式資料夾的 `viewer\`，資料也存放在那裡），在主視窗按「開啟影像圖書館」即可開啟並連結目前的資料夾；要更新內含的版本，修改 `packaging/viewer.json` 後重新建置。給沒有裝本程式的同事使用時，它可匯入本程式產生的「媒體清冊」Excel，像影像圖書館的總目錄一樣瀏覽、搜尋、挑選和播放影片；清冊的每個欄位都能直接編輯，修改會即時寫回原始 Excel。可到它的 [Releases](https://github.com/pony6832/video-library-viewer/releases) 下載免安裝的 `VideoLibraryViewer.exe`（不需要 Python），請使用 1.3.0 以上版本：匯入時輸入影片資料夾，就會直接連結本程式的分析資料庫，分析結果即時顯示。
 
 > Organizer 0.3.0 Beta 3 起，重建 Excel 時會保留人工修改：在面板或 Excel 中改過的「狀態」「內容描述」「重點」「關鍵字」「拍攝時間」，以及自行新增的欄位（例如挑選、評等、備註、自訂欄位），即使影片重新分析也以人工修改為準。檔名、完整路徑、媒體類型、處理時間、Markdown／備份路徑、錯誤原因仍由 Organizer 產生；清空的儲存格會由分析結果補回。比對依據是清冊中的隱藏工作表「_organizer_baseline」，請勿刪除。面板第一次寫入前，會先把清冊備份到它的 `data\backups\` 資料夾。

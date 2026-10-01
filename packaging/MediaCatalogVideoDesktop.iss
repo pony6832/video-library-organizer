@@ -7,6 +7,9 @@
 #ifndef AppVersion
   #error AppVersion is required (scripts/build-desktop.ps1 reads it from pyproject.toml)
 #endif
+#ifndef ViewerDir
+  #error ViewerDir is required (scripts/build-desktop.ps1 downloads the pinned VideoLibraryViewer)
+#endif
 
 [Setup]
 AppId={code:GetAppId}
@@ -49,9 +52,15 @@ Type: dirifempty; Name: "{autoprograms}\Media Catalog Video Desktop"; Check: not
 
 [Files]
 Source: "{#BundleDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+; Media library panel (VideoLibraryViewer). It keeps its database, thumbnails
+; and settings beside itself in {app}\viewer, which upgrades leave in place.
+Source: "{#ViewerDir}\VideoLibraryViewer.exe"; DestDir: "{app}\viewer"; Flags: ignoreversion
+Source: "{#ViewerDir}\LAN-share.bat"; DestDir: "{app}\viewer"; Flags: ignoreversion
 
 [Icons]
 Name: "{group}\Video Library Organizer"; Filename: "{app}\MediaCatalogVideoDesktop.exe"; Check: not IsQAMode
+Name: "{group}\Video Library Viewer"; Filename: "{app}\viewer\VideoLibraryViewer.exe"; WorkingDir: "{app}\viewer"; Check: not IsQAMode
+Name: "{group}\Video Library Viewer (LAN share)"; Filename: "{app}\viewer\LAN-share.bat"; WorkingDir: "{app}\viewer"; IconFilename: "{app}\viewer\VideoLibraryViewer.exe"; Check: not IsQAMode
 Name: "{autodesktop}\Video Library Organizer"; Filename: "{app}\MediaCatalogVideoDesktop.exe"; Tasks: desktopicon; Check: not IsQAMode
 
 [Run]

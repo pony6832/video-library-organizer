@@ -25,6 +25,44 @@ def run(command, *, env, timeout=120):
     return result
 
 
+def check_bundled_viewer(installed, fixture, records, env):
+    """The installer's media library panel opens the analysed folder and reads its database."""
+    import time
+    import urllib.request
+    pin = json.loads((PROJECT / 'packaging' / 'viewer.json').read_text(encoding='utf-8'))
+    viewer = installed / 'viewer' / 'VideoLibraryViewer.exe'
+    assert hashlib.sha256(viewer.read_bytes()).hexdigest() == pin['sha256']
+    assert (installed / 'viewer' / 'LAN-share.bat').is_file()
+    port = 18790
+    process = subprocess.Popen([str(viewer), '--port', str(port), '--no-browser', '--import', str(fixture)],
+                               cwd=viewer.parent, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                               stderr=subprocess.DEVNULL, creationflags=subprocess.CREATE_NO_WINDOW)
+
+    def api(path):
+        with urllib.request.urlopen(f'http://127.0.0.1:{port}{path}', timeout=10) as response:
+            return json.loads(response.read())
+    try:
+        for _ in range(60):
+            try:
+                batches = api('/api/sync')['batches']
+                if batches:
+                    break
+            except OSError:
+                pass
+            time.sleep(0.5)
+        else:
+            raise RuntimeError('bundled viewer did not import the folder')
+        assert api('/api/status')['version'] == pin['version']
+        assert batches[0]['organizer_db'], 'viewer did not link the analysis database'
+        items = api('/api/media')['items']
+        assert sorted(i['filename'] for i in items) == sorted(r.path.name for r in records)
+        assert all(i['db_values'] for i in items)
+    finally:
+        subprocess.run(['taskkill', '/F', '/T', '/PID', str(process.pid)], capture_output=True,
+                       creationflags=subprocess.CREATE_NO_WINDOW)
+    return pin['version']
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('release', type=Path)
@@ -80,15 +118,18 @@ def main():
     assert sheet.max_row == 2 and sheet.max_column == 12 and sheet['C2'].hyperlink
     workbook.close()
     assert before == {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in (video, photo)}
+    viewer_version = check_bundled_viewer(installed, fixture, records, env)
     receipt = {'installed_exe': str(exe), 'fixture': str(fixture), 'local_analysis': args.analyze,
                'video_records': len(records), 'photos_in_catalog': 0, 'original_sha256': before,
-               'excel_rows': 2, 'excel_columns': 12, 'file_hyperlink': True, 'paid_api_calls': False}
+               'excel_rows': 2, 'excel_columns': 12, 'file_hyperlink': True, 'paid_api_calls': False,
+               'bundled_viewer': f'{viewer_version}: linked the analysed folder'}
     if args.uninstall:
         runtime = app_data_root() / '.tools/mcp-video-analyzer/node_modules/mcp-video-analyzer/package.json'
         runtime_hash = hashlib.sha256(runtime.read_bytes()).hexdigest() if runtime.exists() else None
         result_hash = hashlib.sha256(workspace.database_path.read_bytes()).hexdigest()
         run([installed / 'unins000.exe', '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART'], env=env)
         assert not exe.exists()
+        assert not (installed / 'viewer' / 'VideoLibraryViewer.exe').exists()
         assert workspace.excel_path.is_file()
         assert result_hash == hashlib.sha256(workspace.database_path.read_bytes()).hexdigest()
         assert before == {p.name: hashlib.sha256(p.read_bytes()).hexdigest() for p in (video, photo)}

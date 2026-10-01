@@ -12,6 +12,13 @@ The exception permits distribution of applications built with PyInstaller
 under the application's own terms; see the full COPYING.txt in licenses.
 The installer uses Inno Setup. Inno Setup license text is included in licenses.
 
+The installer also contains VideoLibraryViewer (the media library panel, by
+the same project; https://github.com/pony6832/video-library-viewer). It is a
+PyInstaller executable bundling Python (PSF), FastAPI, Starlette, Pydantic,
+uvicorn (BSD/MIT), openpyxl (MIT), python-multipart (Apache 2.0) and pywin32
+(PSF-style). FFmpeg is not bundled with it either; the viewer offers to
+download it on request.
+
 FFmpeg, Node.js, Ollama, mcp-video-analyzer and Qwen model weights are NOT
 bundled. Their separate licenses and terms apply when explicitly downloaded.
 Gemini is an optional external service subject to its own terms and charges.
