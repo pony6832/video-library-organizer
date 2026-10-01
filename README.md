@@ -111,3 +111,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-media-inve
 - `MEDIA_ANALYSIS_ERROR`：環境預檢、來源完整性、Excel 鎖定或重複執行失敗。
 
 所有會修改 SQLite／Excel 的命令都會鎖定單一清冊，避免兩個程序同時寫入。若上次異常中斷，重新執行會自動恢復 `processing`、`skipped`、重試 `failed`，並修復舊版狀態已完成但描述／重點／關鍵字不完整的項目。批次結束前會從 SQLite 原子式重建 Excel，因此前一次中止留下的半成品會在重跑時補齊。
+
+## 影像圖書館（清冊檢視面板）
+
+`media_library/` 是一個本機網頁面板，可匯入本程式產生的「媒體清冊」Excel，像影像圖書館的總目錄一樣瀏覽、搜尋、挑選和播放影片。清冊的每個欄位都能直接編輯，修改會即時寫回原始 Excel。啟動方式與功能說明見 [media_library/README.md](media_library/README.md)。
+
+> 注意：本程式批次結束時會從 SQLite 重建 Excel。若用面板改過某份清冊後，又用本程式對同一份清冊重新執行分析，面板寫進 Excel 的修改可能會被覆蓋。面板第一次寫入前，會先把清冊備份到 `media_library/data/backups/`。
