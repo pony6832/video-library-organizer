@@ -4,7 +4,7 @@
 > 前身為「Media Catalog Video Desktop」0.2.0；安裝時會直接升級舊版並改用新名稱的捷徑（清冊、模型、工具與 Key 都會保留）。
 >
 > Beta 3：重建 Excel 時保留人工修改（在 Excel 或影像圖書館面板改過的狀態、描述、重點、關鍵字與自訂欄位）。
-> Beta 2：另附「影像圖書館」清冊檢視面板（media_library ZIP，需另行下載）。
+> 清冊檢視面板（影像圖書館）請另外下載 VideoLibraryViewer 1.2.0 以上版本：https://github.com/pony6832/video-library-viewer/releases
 >
 > 0.3.0 的主要變更：
 > - 新介面：上方步驟列標示目前進度，右側「下一步」提示該按什麼；分析方式改為「本機分析／Gemini 雲端強化」兩張選項卡。

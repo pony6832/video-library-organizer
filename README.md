@@ -127,6 +127,6 @@ powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\install-media-inve
 
 ## 影像圖書館（清冊檢視面板）
 
-`media_library/` 是一個本機網頁面板，可匯入本程式產生的「媒體清冊」Excel，像影像圖書館的總目錄一樣瀏覽、搜尋、挑選和播放影片。清冊的每個欄位都能直接編輯，修改會即時寫回原始 Excel。啟動方式與功能說明見 [media_library/README.md](media_library/README.md)。
+清冊檢視面板已獨立為 [VideoLibraryViewer](https://github.com/pony6832/video-library-viewer)，程式碼只在那個倉庫維護（本倉庫 0.3.0 Beta 2～3 曾附的 `media_library/` 已移除）。它可匯入本程式產生的「媒體清冊」Excel，像影像圖書館的總目錄一樣瀏覽、搜尋、挑選和播放影片；清冊的每個欄位都能直接編輯，修改會即時寫回原始 Excel。到它的 [Releases](https://github.com/pony6832/video-library-viewer/releases) 下載免安裝的 `VideoLibraryViewer.exe`（不需要 Python），請使用 1.2.0 以上版本。
 
-> Organizer 0.3.0 Beta 3 起，重建 Excel 時會保留人工修改：在面板或 Excel 中改過的「狀態」「內容描述」「重點」「關鍵字」「拍攝時間」，以及自行新增的欄位（例如挑選、評等、備註、自訂欄位），即使影片重新分析也以人工修改為準。檔名、完整路徑、媒體類型、處理時間、Markdown／備份路徑、錯誤原因仍由 Organizer 產生；清空的儲存格會由分析結果補回。比對依據是清冊中的隱藏工作表「_organizer_baseline」，請勿刪除。面板第一次寫入前，會先把清冊備份到 `media_library/data/backups/`。
+> Organizer 0.3.0 Beta 3 起，重建 Excel 時會保留人工修改：在面板或 Excel 中改過的「狀態」「內容描述」「重點」「關鍵字」「拍攝時間」，以及自行新增的欄位（例如挑選、評等、備註、自訂欄位），即使影片重新分析也以人工修改為準。檔名、完整路徑、媒體類型、處理時間、Markdown／備份路徑、錯誤原因仍由 Organizer 產生；清空的儲存格會由分析結果補回。比對依據是清冊中的隱藏工作表「_organizer_baseline」，請勿刪除。面板第一次寫入前，會先把清冊備份到它的 `data\backups\` 資料夾。
